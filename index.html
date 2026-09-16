@@ -1,0 +1,3416 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TFT 構成ラボ</title>
+<style>
+:root{
+  --bg:#11151c; --panel:#171d26; --panel2:#1d2530; --line:#2a3442;
+  --fg:#dfe6ef; --dim:#8b98a8; --accent:#6ea8fe; --warn:#e0a33e; --bad:#e06c75; --ok:#7bc86c;
+  --c1:#9aa5b1; --c2:#4fb477; --c3:#4a90d9; --c4:#b06cc9; --c5:#d9a441;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:13px/1.6 "Segoe UI","Yu Gothic UI",Meiryo,system-ui,sans-serif}
+a{color:var(--accent)}
+header{padding:14px 18px;border-bottom:1px solid var(--line);background:var(--panel);
+  display:flex;flex-wrap:wrap;gap:14px;align-items:baseline;position:sticky;top:0;z-index:10}
+h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.02em}
+.meta{color:var(--dim);font-size:12px}
+.spacer{flex:1}
+.modes button,.tabs button{background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+  padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px}
+.modes button.on,.tabs button.on{background:var(--accent);color:#0d1117;border-color:var(--accent);font-weight:600}
+.banner{padding:9px 18px;font-size:12px;background:#33291a;color:#f0d29a;
+  border-bottom:1px solid var(--line)}
+.tabs{padding:10px 18px;display:flex;gap:7px;flex-wrap:wrap;border-bottom:1px solid var(--line);background:var(--panel)}
+main{padding:16px 18px 60px;overflow-x:hidden}
+.controls{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
+input[type=search],select{background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+  padding:6px 9px;border-radius:5px;font-size:12px;font-family:inherit}
+input[type=search]{min-width:210px}
+
+/* 盤面 */
+.hexgrid{display:flex;flex-direction:column;gap:2px;margin:10px 0;user-select:none}
+.hexrow{display:flex;gap:3px}
+.hexrow.odd{margin-left:26px}
+.hex{width:50px;flex-direction:column;height:50px;border-radius:7px;border:1px solid var(--line);
+  background:var(--panel2);font-size:9.5px;line-height:1.15;padding:3px;
+  display:flex;flex-direction:column;justify-content:center;align-items:center;
+  overflow:hidden;text-align:center;cursor:default;position:relative}
+/* 配置タブは敵陣をクリックして相手を入力する。押せるのは敵陣側。 */
+.hex.enemy{cursor:pointer;border-style:dashed}
+.hex.enemy:hover{outline:2px solid var(--accent)}
+.hex.own{opacity:.95}
+.hex.carry{outline:2px solid var(--accent);font-weight:700}
+.hex .r{position:absolute;top:1px;right:3px;font-size:8px;color:var(--dim)}
+.legend{display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:11.5px;color:var(--dim)}
+.swatch{display:inline-block;width:14px;height:14px;border-radius:3px;
+  border:1px solid var(--line);vertical-align:-2px;margin-right:3px}
+/* 表だけは横スクロールを許す。本文(body)は絶対に横に溢れさせない */
+.tablewrap{overflow-x:auto;max-width:100%}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{position:sticky;top:0;background:var(--panel2);cursor:pointer;user-select:none;font-weight:600;
+  color:var(--dim);z-index:2}
+th:hover{color:var(--fg)}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--panel2)}
+tbody tr.sel{background:#243247}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.cost{display:inline-block;width:15px;height:15px;line-height:15px;text-align:center;border-radius:3px;
+  font-size:10px;font-weight:700;color:#0d1117}
+.c1{background:var(--c1)}.c2{background:var(--c2)}.c3{background:var(--c3)}.c4{background:var(--c4)}.c5{background:var(--c5)}
+.tag{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+  padding:0 7px;margin:1px 2px 1px 0;font-size:11px;color:var(--dim)}
+.tag.hit{border-color:var(--accent);color:var(--accent)}
+.split{display:grid;grid-template-columns:1fr 380px;gap:16px;align-items:start}
+/* ★ グリッドの子は min-width:auto が既定で、中身の最小幅より縮まない ★
+   これのせいで .tablewrap が表と同じ 824px に広がり、overflow-x:auto が
+   一度も効いていなかった。main{overflow-x:hidden} が溢れた分を切り落とすので、
+   390px の実機では12列中6列（HP 以降）が見えず、スクロールもできなかった。 */
+.split>*{min-width:0}
+@media(max-width:1000px){.split{grid-template-columns:1fr}}
+
+/* ---- スマホ ----
+   横スクロールさせてよいのは表と盤面だけ。本文は絶対に溢れさせない。 */
+@media(max-width:720px){
+  body{font-size:13px}
+  header{flex-wrap:wrap;gap:6px;padding:8px 10px}
+  header h1{font-size:15px}
+  /* セット名やパッチ番号は見出しで分かるので、狭い画面では畳む */
+  .meta{display:none}
+  .modes{width:100%;display:flex;gap:6px}
+  .modes button{flex:1}
+  /* タブは折り返す。横スクロールにすると隠れたタブに気づけない */
+  .tabs{padding:7px 10px;gap:5px}
+  .tabs button{white-space:nowrap;font-size:12px;padding:6px 9px}
+  /* 冗長な注記は狭い画面では短く */
+  .banner{padding:7px 10px;font-size:11px;line-height:1.5}
+  /* カードの sticky はスマホだと邪魔になるだけ */
+  .card{position:static;max-height:none}
+  main{padding:10px}
+  .controls{flex-wrap:wrap;gap:6px}
+  .controls select,.controls input{flex:1 1 140px;min-width:0;font-size:13px}
+  .card{max-height:none;position:static}
+  .tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{font-size:12px}
+  th,td{padding:5px 6px}
+  /* 盤面は指で押せる大きさを保ちつつ画面に収める */
+  .hex{width:38px;height:38px;font-size:9px}
+  .hexrow{gap:2px}
+  .hexrow.odd{margin-left:20px}
+  .note{font-size:11.5px}
+  footer{padding:10px;font-size:10.5px}
+}
+@media(max-width:400px){
+  .hex{width:32px;height:32px}
+  .hexrow.odd{margin-left:17px}
+}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;
+  position:sticky;top:130px;max-height:calc(100vh - 150px);overflow:auto}
+.card h2{margin:0 0 3px;font-size:15px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:12px;margin:9px 0}
+.kv dt{color:var(--dim)}
+.kv dd{margin:0;font-variant-numeric:tabular-nums}
+.badge{display:inline-block;padding:1px 7px;border-radius:4px;font-size:10.5px;font-weight:600}
+.badge.ok{background:#1f3a2a;color:var(--ok)}
+.wtxt{color:var(--warn)}
+.badge.warn{background:#3a3018;color:var(--warn)}
+.badge.bad{background:#3d2326;color:var(--bad)}
+/* 「悪い」ではなく「該当しない」ことを示す中立のバッジ（後衛に届かない等） */
+.badge.off{background:var(--panel2);color:var(--dim);border:1px solid var(--line)}
+.note{color:var(--dim);font-size:11.5px;margin:7px 0}
+.abil{background:var(--panel2);border-radius:6px;padding:9px;font-size:12px;margin:9px 0;
+  white-space:pre-wrap;line-height:1.65;overflow-wrap:anywhere}
+.starbox{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:9px 0}
+.starbox div{background:var(--panel2);border-radius:5px;padding:6px;text-align:center}
+.starbox b{display:block;font-size:14px;font-variant-numeric:tabular-nums}
+.starbox span{color:var(--dim);font-size:10.5px}
+.wrap{white-space:normal}
+.dim{color:var(--dim)}
+.hr{height:1px;background:var(--line);margin:12px 0}
+.empty{color:var(--dim);padding:30px;text-align:center}
+code{background:var(--panel2);padding:1px 5px;border-radius:3px;font-size:11.5px}
+</style>
+</head>
+<body>
+<header>
+  <h1>TFT 構成ラボ</h1>
+  <span class="meta" id="setmeta"></span>
+  <span class="spacer"></span>
+  <span class="modes">
+    <button data-mode="study" class="on">研究（じっくり）</button>
+    <button data-mode="play">対戦中（すぐ引く）</button>
+  </span>
+</header>
+<div class="banner" id="banner"></div>
+<div class="tabs" id="tabs"></div>
+<main id="main"></main>
+<footer style="padding:18px;border-top:1px solid var(--line);color:var(--dim);
+  font-size:11px;line-height:1.7;margin-top:30px">
+  tft-comp-lab isn't endorsed by Riot Games and doesn't reflect the views or opinions of
+  Riot Games or anyone officially involved in producing or managing Riot Games properties.
+  Riot Games and all associated properties are trademarks or registered trademarks of
+  Riot Games, Inc.<br>
+  <span style="opacity:.75">個人用の非公式ツール。対戦中に表示してよいのは試合前から入手できる静的データのみ
+  （Riot の開発者ポリシー）。相手構成は手入力する設計にしてある。</span>
+</footer>
+
+<script src="data.js"></script>
+<script>
+const T = window.TFT;
+const $ = (s,r=document)=>r.querySelector(s);
+const el = (t,c,txt)=>{const e=document.createElement(t); if(c)e.className=c; if(txt!=null)e.textContent=txt; return e;};
+const fmt = v => v==null ? '—' : (typeof v==='number' ? (Number.isInteger(v)?v:v.toFixed(v<10?2:1)) : v);
+
+// 既定は「先に使う構成」。このツールの目的そのものなので最初に見せる。
+let mode='study', tab='forecast', sel=null;
+const sort = {units:{key:'cost',dir:-1}, items:{key:'category',dir:1}, traits:{key:'name',dir:1}, augments:{key:'rarity',dir:1},
+              rankCarry:{key:'theo',dir:-1}, rankComp:{key:'score',dir:-1}};
+// ランキングタブの状態（タブを往復しても選択が戻らないように外に置く）
+let rankView='carry', rankCostBand='';
+
+/* ---------- header ---------- */
+$('#setmeta').textContent =
+  `セット ${T.meta.set_number}${T.meta.patch?' / パッチ '+T.meta.patch:''} · ユニット${T.units.length} · トレイト${T.traits.length} · アイテム${T.items.length} · オーグメント${T.augments.length}`;
+
+const cov = T.meta.ability_coverage;
+/* 理論値と実測の鮮度のズレ。
+   このツールを作った動機（op.gg は正しいが遅い）そのものなので、
+   ズレているときは常に見えるところに出す。 */
+(function(){
+  const F = T.freshness;
+  if(!F || !F.measured_is_stale) return;
+  const d = document.createElement('div');
+  d.className = 'banner';
+  d.style.background = '#3d2326';
+  d.style.color = '#f3b5bb';
+  d.innerHTML = '<b>実測は前のパッチのものです。</b>'
+    + '理論値＝パッチ <b>' + (F.theory_patch || '?') + '</b>（Riot のデータから即時）／'
+    + '実測＝パッチ <b>' + (F.measured_patch || '?') + '</b>（op.gg の集計待ち）。'
+    + 'このズレがあるあいだ、<b>予想順位と実測メタは前のパッチの環境</b>を映しています。'
+    + '理論ダメージ・構成・配置・オーグメントは新しいパッチで計算されています。';
+  const b = document.getElementById('banner');
+  b.parentNode.insertBefore(d, b.nextSibling);
+})();
+
+$('#banner').innerHTML = cov > 0.5
+  ? `<span class="badge ok">スキル係数あり ${Math.round(cov*100)}%</span> `
+    + ` Riot はこのセットの係数を配信していないので、<b>op.gg の二次データ</b>で補っている。`
+    + ` 基礎ステータスは Riot 側と 74/74 で一致することを確認済み。`
+    + ` 手入力（<code>data/manual/set${T.meta.set_number}_abilities.json</code>）があればそちらが優先される。`
+    + ` 詳細は <code>docs/01_データ源.md</code>。`
+  : `<span class="badge bad">スキル係数なし</span> 取得率 ${Math.round(cov*100)}%。`
+    + ` <b>スキルDPS は計算できない</b>ので、下の DPS は<b>通常攻撃のみ</b>。`
+    + ` <code>data/manual/set${T.meta.set_number}_abilities.json</code> に手入力すると反映される。`;
+
+/* ---------- tabs ---------- */
+// タブはモードで分ける。
+//   研究   … 時間をかけて調べる。全部出す
+//   対戦中 … 試合中に素早く引く。手数の少ないものだけ
+// 対戦中に出してよいのは**試合前から手元にある静的データ**だけで、
+// 相手の盤面を自動で読むこと（Scouting）はしない（docs/03 §5）。
+const TAB_SETS = {
+  study: [['forecast','先に使う構成'],['rank','ランキング'],['carry','キャリー逆引き'],['front','前衛（壁）'],
+          ['board','配置'],['econ','リロール確率'],['units','ユニット'],
+          ['traits','トレイト'],['items','アイテム'],['augments','オーグメント'],
+          ['constants','定数の検証状態']],
+  play:  [['forecast','先に使う構成'],['live','オーグメント（取った→次）'],
+          ['board','配置'],['econ','リロール確率'],['carry','構成']],
+};
+let TABS = TAB_SETS.study;
+function buildTabs(resetTab){
+  TABS = TAB_SETS[mode] || TAB_SETS.study;
+  const host = $('#tabs');
+  host.innerHTML='';
+  // モードを切り替えたら、そのモードの先頭タブに行く。
+  // 「対戦中」に入った瞬間にオーグメント画面が出てほしいので、
+  // 同じ名前のタブが両方にあっても引き継がない。
+  if(resetTab || !TABS.some(([k])=>k===tab)) tab = TABS[0][0];
+  TABS.forEach(([k,label])=>{
+    const b=el('button',null,label);
+    if(k===tab) b.classList.add('on');
+    b.onclick=()=>{tab=k; sel=null; render();
+      [...host.children].forEach(x=>x.classList.toggle('on',x===b));};
+    host.appendChild(b);
+  });
+}
+buildTabs();
+document.querySelectorAll('.modes button').forEach(b=>{
+  b.onclick=()=>{mode=b.dataset.mode;
+    document.querySelectorAll('.modes button').forEach(x=>x.classList.toggle('on',x===b));
+    buildTabs(true); render();};
+});
+
+/* ---------- helpers ---------- */
+function costChip(c){ const s=el('span','cost c'+c,c); return s; }
+
+/* ---------- 構成の新2軸（派生・ゴールド） ----------
+   comp_forecast18.json の各行に derivations / gold が入る。
+   古い data.js（再生成前）には入っていないことがあるので、
+   **無いときは 0 でごまかさず missing として出す**。0 と「不明」は意味が違う
+   （派生0＝一本道＝判断材料、派生不明＝ただのデータ欠け）。 */
+function dv(r){
+  const d = r && r.derivations;
+  return d ? {hard:d.hard, soft:d.soft, flex:d.flex_slots, missing:false}
+           : {hard:-1, soft:-1, flex:-1, missing:true};
+}
+function gd(r){
+  const g = r && r.gold;
+  return g ? {floor:g.floor, all_2star:g.all_2star, missing:false}
+           : {floor:null, all_2star:Infinity, missing:true};
+}
+
+/* ---------- 後衛に届くか ----------
+   ★「跳躍を持つ」と「後衛に届く」は別物★
+   Gnar は3ヘクス跳ぶが狙うのは「敵の塊」で、塊があるのは前衛なので
+   前衛のど真ん中に着地する。届くかどうかを決めるのは移動の有無ではなく
+   **狙う相手**（target）。判定は src/engine/backline.py に一本化してあり、
+   画面はその結果をそのまま出すだけで、ここで再判定はしない。
+
+   混ぜてはいけない4状態:
+     届く       reaches=true
+     前衛止まり reaches=false（動くが後衛には入らない。Gnar / Ezreal / Yunara 等）
+     未分類     移動語はあるが狙う相手の言い回しが未登録（新パッチで増えうる）
+     移動なし   説明文に移動語が無い＝判定の対象外（Set18 では74体中66体）
+   「未分類」を「届かない」に丸めると、新しい言い回しが来たときに黙って
+   消える。traits.py / augments.py と同じで、分からないものは分からないと出す。 */
+function backlineState(u){
+  const b = u && u.backline;
+  if(!b) return {key:'none', rank:0, label:'移動なし', cls:'badge off',
+                 title:'スキルの説明文に移動を表す語が無い。後衛到達の判定対象外。'};
+  const tail = (b.note||'') + (b.hexes ? '（' + b.hexes + ' ヘクス）' : '')
+             + (b.evidence ? '\n原文: ' + b.evidence : '');
+  // 召喚物が飛ぶケースは「理由が分かっている除外」であって未分類ではない。
+  // 同じ 'unknown' にしていたため、Maokai に未分類バッジが出るのに
+  // 注記は「未分類 0 件」と言う矛盾が起きていた。
+  if(b.target==='summon')
+    return {key:'summon', rank:1, label:'召喚物が飛ぶ', cls:'badge off', title:tail};
+  if(b.target==='unknown')
+    return {key:'unknown', rank:2, label:'未分類', cls:'badge warn', title:tail};
+  if(b.reaches) return {key:'reach', rank:3, label:'後衛に届く', cls:'badge ok', title:tail};
+  return {key:'front', rank:1, label:'前衛止まり', cls:'badge off', title:tail};
+}
+function backlineTag(u, opts){
+  const st = backlineState(u);
+  // 一覧では「移動なし」が66体並ぶだけなので、要求があるときだけ出す。
+  if(st.key==='none' && opts && opts.hideNone) return el('span','dim','—');
+  const s = el('span', st.cls, st.label);
+  s.title = st.title;
+  return s;
+}
+/* 判定の守備範囲そのものを画面に出す。0件でも枠を残す（黙って落ちるのを防ぐ） */
+function backlineGapsNote(){
+  const d = el('div','note');
+  const un = (T.meta && T.meta.backline_unclassified) || [];
+  const gaps = (T.meta && T.meta.backline_known_gaps) || [];
+  const has = T.units.some(function(u){ return u.backline !== undefined; });
+  let h = '<b>後衛到達の判定について。</b>';
+  if(!has){
+    h += '<span class="wtxt">このデータには backline が入っていない（build_app が古い）。'
+       + '全ユニットが「移動なし」に見えるので鵜呑みにしないこと。</span>';
+  } else {
+    h += 'スキル説明文の移動語から判定している。分類できたのは '
+       + T.units.filter(function(u){ return u.backline; }).length + ' 体 / '
+       + T.units.length + ' 体。';
+    h += '<br>未分類（移動語はあるが狙う相手の言い回しが未登録）: <b>' + un.length + ' 件</b>'
+       + (un.length ? '　' + un.map(function(x){ return x.name; }).join(' / ') : '（今は無い。新パッチで増える）');
+  }
+  d.innerHTML = h;
+  // 取りこぼしは名前を並べるだけにして、理由は1件ずつ持たせる。
+  // まとめて「実際は動く」と書くと嘘になる（Nidalee は移動しないまま最遠の敵を殴るし、
+  // Gnar は投げた敵が飛ぶだけで本体は残る）。件数と個別の理由だけを出す。
+  if(has && gaps.length){
+    const g=el('div');
+    g.appendChild(document.createTextNode('移動語では拾えないと分かっている言い回し '
+      + gaps.length + ' 件（表の印だけで判断しないこと）: '));
+    gaps.forEach(function(x){
+      const s=el('span','tag',x.name);
+      s.title=(x.note||'')+(x.evidence?'\n原文: '+x.evidence:'');
+      g.appendChild(s);
+    });
+    d.appendChild(g);
+  }
+  return d;
+}
+
+function sortRows(rows, s, accessors){
+  const f = accessors[s.key] || (r=>r[s.key]);
+  return rows.slice().sort((a,b)=>{
+    let x=f(a), y=f(b);
+    if(x==null)x=-Infinity; if(y==null)y=-Infinity;
+    if(typeof x==='string'||typeof y==='string'){ x=String(x); y=String(y); return s.dir*x.localeCompare(y,'ja'); }
+    return s.dir*(x-y);
+  });
+}
+
+function mkTable(cols, rows, s, onSort, onPick, isSel){
+  const t=el('table'), th=el('thead'), tr=el('tr');
+  cols.forEach(c=>{
+    const h=el('th',null,c.label + (s.key===c.key ? (s.dir>0?' ▲':' ▼') : ''));
+    h.onclick=()=>onSort(c.key);
+    if(c.num) h.style.textAlign='right';
+    tr.appendChild(h);
+  });
+  th.appendChild(tr); t.appendChild(th);
+  const tb=el('tbody');
+  rows.forEach(r=>{
+    const row=el('tr');
+    if(isSel&&isSel(r)) row.className='sel';
+    cols.forEach(c=>{
+      const td=el('td', c.num?'num':(c.wrap?'wrap':null));
+      const v=c.render?c.render(r):r[c.key];
+      if(v instanceof Node) td.appendChild(v); else td.textContent = c.num?fmt(v):(v==null?'—':v);
+      row.appendChild(td);
+    });
+    if(onPick) row.onclick=()=>onPick(r);
+    tb.appendChild(row);
+  });
+  t.appendChild(tb);
+  const wrap=el('div','tablewrap'); wrap.appendChild(t);
+  return wrap;
+}
+
+/* ---------- units ---------- */
+function unitCols(){
+  const base=[
+    {key:'cost',label:'C',render:u=>costChip(u.cost)},
+    {key:'name',label:'ユニット',render:u=>{
+      const d=el('span');
+      d.style.cssText='display:inline-flex;align-items:center;gap:7px';
+      d.appendChild(unitIcon(u,24));
+      d.appendChild(document.createTextNode(u.name));
+      return d;
+    }},
+    {key:'traits',label:'トレイト',wrap:true,render:u=>{
+      const f=document.createDocumentFragment();
+      u.traits.forEach(t=>f.appendChild(el('span','tag',t)));
+      return f;}},
+    {key:'dps2',label:'通常DPS 2★',num:true},
+    {key:'dps3',label:'通常DPS 3★',num:true},
+    {key:'ehp',label:'EHP(物理) 2★',num:true},
+  ];
+  if(mode==='study') base.push(
+    {key:'hp2',label:'HP 2★',num:true},
+    {key:'ad2',label:'AD 2★',num:true},
+    {key:'as',label:'攻撃速度',num:true},
+    {key:'range',label:'射程(hex)',num:true},
+    {key:'mana',label:'マナ',num:true},
+    // ★ 8秒の戦闘で実際に何回撃てるか ★
+    // 74体中38体が0回。つまり「スキルが強い」と書いてあっても、
+    // マナアイテムを積まない限りその火力は出ない。
+    // ここを出さないと、撃てないユニットと撃てるユニットが同じ顔で並ぶ。
+    {key:'casts',label:'8秒で詠唱',num:true,render:u=>{
+      const st=u.stars['2'], n=st.casts, f=st.first_cast;
+      if(n===null||n===undefined) return el('span','dim','—');
+      if(n>0) return el('span',null,n+' 回');
+      const s=el('span',null, f ? ('0 回（初回 '+f+'秒）') : '0 回');
+      s.style.color='var(--bad)';
+      s.title='8秒の戦闘に初回詠唱が間に合っていない。'
+            + 'マナアイテム（Blue Buff / Spear of Shojin 等）が要る';
+      return s;}},
+    // 「跳ぶか」ではなく「後衛に届くか」。中身は backlineState() のコメント参照
+    {key:'backline',label:'後衛到達',render:u=>backlineTag(u)},
+    {key:'eff',label:'DPS/コスト',num:true});
+  return base;
+}
+const UA = {
+  dps2:u=>u.stars['2'].auto_dps, dps3:u=>u.stars['3'].auto_dps,
+  ehp:u=>u.stars['2'].ehp_p, hp2:u=>u.stars['2'].hp, ad2:u=>u.stars['2'].ad,
+  as:u=>u.base.attackSpeed, range:u=>u.base.rangeHexes ?? u.base.range,
+  mana:u=>u.base.mana, eff:u=>u.stars['2'].auto_dps/u.cost,
+  casts:u=>u.stars['2'].casts,
+  traits:u=>u.traits.join(','),
+  // 列の中身はオブジェクトなので、並べ替えは状態の順位（届く>未分類>前衛止まり>移動なし）で行う
+  backline:u=>backlineState(u).rank,
+};
+function decorate(u){
+  return Object.assign({}, u, {
+    dps2:UA.dps2(u), dps3:UA.dps3(u), ehp:UA.ehp(u), hp2:UA.hp2(u), ad2:UA.ad2(u),
+    as:UA.as(u), range:UA.range(u), mana:UA.mana(u), eff:Math.round(UA.eff(u)*10)/10,
+    casts:UA.casts(u),
+  });
+}
+
+function unitDetail(u){
+  const c=el('div','card');
+  c.appendChild(el('h2',null,u.name));
+  const sub=el('div','note'); sub.textContent=`コスト ${u.cost} · ${u.traits.join(' / ')}`;
+  c.appendChild(sub);
+
+  const sb=el('div','starbox');
+  [['1','1★'],['2','2★'],['3','3★']].forEach(([k,lab])=>{
+    const s=u.stars[k], d=el('div');
+    d.appendChild(el('b',null,fmt(s.auto_dps)));
+    d.appendChild(el('span',null,lab+' 通常DPS'));
+    if(s.placeholder) d.appendChild(el('span','dim','※ダミー値'));
+    sb.appendChild(d);
+  });
+  const d4=el('div');
+  d4.appendChild(el('b',null,fmt(u.stars['2'].ehp_p)));
+  d4.appendChild(el('span',null,'2★ EHP(物理)'));
+  sb.appendChild(d4);
+  c.appendChild(sb);
+
+  const dl=el('dl','kv');
+  const rows=[
+    ['HP 1/2/3★', [1,2,3].map(s=>fmt(u.stars[s].hp)).join(' / ')],
+    ['AD 1/2/3★', [1,2,3].map(s=>fmt(u.stars[s].ad)).join(' / ')],
+    ['攻撃速度', fmt(u.base.attackSpeed)],
+    ['物理防御 / 魔法防御', `${fmt(u.base.armor)} / ${fmt(u.base.magicResist)}`],
+    ['射程', u.base.rangeUnits!=null ? `${fmt(u.base.range)} hex (${fmt(u.base.rangeUnits)} 単位)` : fmt(u.base.range)],
+    ['マナ', `${fmt(u.base.initialMana)} → ${fmt(u.base.mana)}`],
+    ['詠唱までの間隔', u.stars['2'].cast_interval!=null?fmt(u.stars['2'].cast_interval)+' 秒':'—'],
+    ['クリ率 / 倍率', `${Math.round((u.base.critChance||0)*100)}% / ×${fmt(u.base.critMultiplier)}`],
+    ['EHP 物理 / 魔法', `${fmt(u.stars['2'].ehp_p)} / ${fmt(u.stars['2'].ehp_m)}`],
+  ];
+  if(u.bin){
+    rows.push(['移動速度', fmt(u.bin.moveSpeed)]);
+    const sp=Object.values(u.bin.spells||{})[0];
+    if(sp&&sp.cast_time!=null) rows.push(['詠唱時間', fmt(sp.cast_time)+' 秒']);
+  }
+  rows.forEach(([k,v])=>{dl.appendChild(el('dt',null,k)); dl.appendChild(el('dd',null,v));});
+  c.appendChild(dl);
+
+  c.appendChild(el('div','hr'));
+  const ah=el('div'); ah.appendChild(el('b',null,u.ability.name||'スキル'));
+  ah.appendChild(document.createTextNode(' '));
+  ah.appendChild(el('span','badge '+(u.ability.known?'ok':'bad'), u.ability.known?'数値あり':'係数なし'));
+  c.appendChild(ah);
+  c.appendChild(el('div','abil', u.ability.text || '（説明文なし）'));
+  if(!u.ability.known)
+    c.appendChild(el('div','note','このセットは Riot がスキル係数を配信していないため、スキルDPSは計算していない。'));
+
+  c.appendChild(el('div','hr'));
+  c.appendChild(el('div','note','このユニットが噛むトレイト'));
+  T.traits.filter(t=>u.traits.includes(t.name)).forEach(t=>{
+    const b=el('div');
+    b.appendChild(el('span','tag hit', `${t.name} (${t.breakpoints.join('/')})`));
+    b.appendChild(el('span','dim', ` 候補 ${t.member_count} 体`));
+    c.appendChild(b);
+  });
+  return c;
+}
+
+/* ---------- render ---------- */
+function render(){
+  const m=$('#main'); m.innerHTML='';
+  if(tab==='forecast') return renderForecast(m);
+  if(tab==='rank') return renderRank(m);
+  if(tab==='live') return renderLive(m);
+  if(tab==='front') return renderFrontline(m);
+  if(tab==='carry') return renderCarry(m);
+  if(tab==='board') return renderBoard(m);
+  if(tab==='econ') return renderEcon(m);
+  if(tab==='units') return renderUnits(m);
+  if(tab==='traits') return renderTraits(m);
+  if(tab==='items') return renderItems(m);
+  if(tab==='augments') return renderAugments(m);
+  if(tab==='constants') return renderConstants(m);
+}
+
+function renderUnits(m){
+  const ctl=el('div','controls');
+  const q=el('input'); q.type='search'; q.placeholder='ユニット名 / トレイトで絞り込み';
+  const costSel=el('select');
+  costSel.appendChild(new Option('全コスト',''));
+  [1,2,3,4,5].forEach(c=>costSel.appendChild(new Option(c+' コスト',c)));
+  const traitSel=el('select');
+  traitSel.appendChild(new Option('全トレイト',''));
+  T.traits.forEach(t=>traitSel.appendChild(new Option(`${t.name} (${t.member_count})`,t.name)));
+  ctl.append(q,costSel,traitSel);
+  const count=el('span','dim'); ctl.appendChild(count);
+  m.appendChild(ctl);
+
+  const split=el('div','split'), left=el('div'), right=el('div');
+  split.append(left,right); m.appendChild(split);
+  if(mode==='study') m.appendChild(backlineGapsNote());
+
+  function draw(){
+    const term=q.value.trim().toLowerCase();
+    let rows=T.units.map(decorate).filter(u=>{
+      if(costSel.value && String(u.cost)!==costSel.value) return false;
+      if(traitSel.value && !u.traits.includes(traitSel.value)) return false;
+      if(term && !(u.name.toLowerCase().includes(term) ||
+                   u.traits.join(' ').toLowerCase().includes(term))) return false;
+      return true;
+    });
+    rows=sortRows(rows, sort.units, UA);
+    count.textContent=`${rows.length} 体`;
+    left.innerHTML='';
+    left.appendChild(mkTable(unitCols(), rows, sort.units,
+      k=>{ if(sort.units.key===k) sort.units.dir*=-1; else {sort.units.key=k; sort.units.dir=-1;} draw(); },
+      u=>{ sel=u.apiName; draw(); },
+      u=>u.apiName===sel));
+    right.innerHTML='';
+    const pick = rows.find(u=>u.apiName===sel) || rows[0];
+    if(pick) right.appendChild(unitDetail(T.units.find(u=>u.apiName===pick.apiName)));
+  }
+  q.oninput=costSel.onchange=traitSel.onchange=draw;
+  draw();
+}
+
+function renderTraits(m){
+  const ctl=el('div','controls');
+  const q=el('input'); q.type='search'; q.placeholder='トレイト名で絞り込み';
+  ctl.appendChild(q); m.appendChild(ctl);
+  const box=el('div'); m.appendChild(box);
+  function draw(){
+    const term=q.value.trim().toLowerCase();
+    box.innerHTML='';
+    T.traits.filter(t=>!term||t.name.toLowerCase().includes(term)).forEach(t=>{
+      const c=el('div','card'); c.style.position='static'; c.style.marginBottom='10px'; c.style.maxHeight='none';
+      const h=el('h2',null,t.name);
+      c.appendChild(h);
+      c.appendChild(el('div','note',`発動 ${t.breakpoints.join(' / ')} · 候補 ${t.member_count} 体`));
+      if(mode==='study' && t.desc) c.appendChild(el('div','abil',t.desc));
+      t.tiers.forEach(x=>{
+        const vars=Object.entries(x.variables).map(([k,v])=>`${k}=${fmt(v)}`).join('  ');
+        const d=el('div','note');
+        d.innerHTML = `<b>${x.minUnits} 体</b>　${vars||'<span class="dim">数値なし</span>'}`;
+        c.appendChild(d);
+      });
+      const mem=el('div');
+      t.members.forEach(n=>{
+        const u=T.units.find(x=>x.name===n);
+        const s=el('span','tag', u?`${n} (${u.cost})`:n);
+        mem.appendChild(s);
+      });
+      c.appendChild(mem);
+      box.appendChild(c);
+    });
+  }
+  q.oninput=draw; draw();
+}
+
+function renderItems(m){
+  const ctl=el('div','controls');
+  const q=el('input'); q.type='search'; q.placeholder='アイテム名で絞り込み';
+  const cat=el('select'); cat.appendChild(new Option('全種別',''));
+  [...new Set(T.items.map(i=>i.category))].forEach(c=>cat.appendChild(new Option(c,c)));
+  ctl.append(q,cat);
+  const count=el('span','dim'); ctl.appendChild(count);
+  m.appendChild(ctl);
+  const box=el('div'); m.appendChild(box);
+
+  const keys=[...new Set(T.items.flatMap(i=>Object.keys(i.effects)))]
+    .filter(k=>T.items.filter(i=>k in i.effects).length>=4).sort();
+  const compText = i=>i.composition.map(x=>{
+    const it=T.items.find(y=>y.apiName===x); return it?it.name:x;}).join(' + ')||'—';
+  /* ★ 並べ替えの取り出し方を渡さないと、ヘッダを押しても並びが変わらない ★
+     sortRows は既定で row[列キー] を読む。効果の値は i.effects[キー] の下にあり、
+     素材は render で組み立てる文字列なので、どちらも row 直下には無い。
+     ここに {} を渡していたため、28列のうち25列（効果24＋素材）は
+     ▲▼ だけ付いて並びは1行も動いていなかった。押せば直ったように見えるのが悪い。 */
+  const ACC = {comp: compText};
+  keys.forEach(k=>{ ACC[k] = i=>i.effects[k]; });
+  function draw(){
+    const term=q.value.trim().toLowerCase();
+    const rows=T.items.filter(i=>(!cat.value||i.category===cat.value) &&
+      (!term||(i.name||'').toLowerCase().includes(term)));
+    count.textContent=`${rows.length} 件`;
+    const cols=[
+      {key:'name',label:'アイテム'},
+      {key:'category',label:'種別'},
+      {key:'comp',label:'素材',wrap:true,render:compText},
+      ...keys.map(k=>({key:k,label:k,num:true,render:i=>i.effects[k]})),
+    ];
+    if(mode==='study') cols.push({key:'desc',label:'効果',wrap:true});
+    box.innerHTML='';
+    box.appendChild(mkTable(cols, sortRows(rows,sort.items,ACC), sort.items,
+      k=>{ if(sort.items.key===k) sort.items.dir*=-1; else {sort.items.key=k; sort.items.dir=1;} draw(); }));
+  }
+  q.oninput=cat.onchange=draw; draw();
+}
+
+/* ================= オーグメントの噛み合い =================
+   ★ 「順位が上がる」とは言わない ★
+   オーグメントの組み合わせ別の実測成績は、どのデータ源にも存在しない。
+   なのでここで出すのは「噛み合いの根拠が何本あるか」であって、強さの順位ではない。
+   根拠は1本ずつ文章で出すので、納得できなければ無視して使う。
+
+   根拠の強さ:
+     強い … そのオーグメントが、いま発動しているトレイトや構成のユニットを
+            **名指ししている**（Riot の説明文にそう書いてある）
+     中   … 効果の軸がキャリーのスケール（AD / AP）と一致する
+     弱い … 取ったオーグメントと同じ系統（Riot のタグ）
+   硬い制約:
+     排他 … 取ったものと排他なら候補から外す（Riot の一次データ） */
+
+const AXIS_NOTE = {
+  'AD': '攻撃力・攻撃速度・クリティカル', 'AP': '呪文力・魔法ダメージ・マナ',
+  '耐久': '体力・防御・シールド・回復', '経済': 'ゴールド・リロール・レベル',
+  'アイテム': 'アイテムや素材を配る', 'ユニット追加': 'ユニットを増やす',
+  '配置': '前列・後列など配置に条件がある',
+};
+
+function currentAugments(){
+  return T.augments.filter(a=>a.engine==='current');
+}
+
+function bannedBy(takenNames){
+  const ban = new Set();
+  takenNames.forEach(n=>{
+    const a = currentAugments().filter(x=>x.name===n)[0];
+    if(a) (a.excludes||[]).forEach(x=>ban.add(x));
+  });
+  return ban;
+}
+
+/* ctx = {units:[unit…], traits:[発動中のtrait名…], carry:unit, taken:[名前…]} */
+/* 噛み合いの理由を、強さの内訳つきで描く。
+   並び順は重み付きスコアなので、件数だけ出すと順番と食い違って見える。
+   なので「強×n 中×n 弱×n」を出して、並びの理由が読めるようにする。 */
+function whyCell(why){
+  const td=el('td','wrap');
+  const w=el('div');
+  w.style.cssText='display:flex;flex-wrap:wrap;gap:4px';
+  why.forEach(function(x){
+    const sp=el('span','tag'+(x.w==='強'?' hit':''), x.w+'  '+x.t);
+    sp.style.marginRight='2px';
+    w.appendChild(sp);
+  });
+  td.appendChild(w);
+  return td;
+}
+function whySummary(why){
+  const c={強:0,中:0,弱:0};
+  why.forEach(function(x){ c[x.w]=(c[x.w]||0)+1; });
+  return ['強','中','弱'].filter(function(k){return c[k];})
+    .map(function(k){return k+'×'+c[k];}).join(' ');
+}
+
+function recommendAugments(ctx, limit){
+  const taken = ctx.taken || [];
+  const ban = bannedBy(taken);
+  const unitNames = new Set((ctx.units||[]).map(u=>u.name));
+  const traitNames = new Set(ctx.traits||[]);
+  const carryAxis = ctx.carry
+    ? (((ctx.carry.ability||{}).scaling||{}).kind === 'AP' ? 'AP' : 'AD') : null;
+  // 取ったものの系統（広すぎるタグは除く）
+  const TAGN = {};
+  T.augments.forEach(a=>(a.riot_tags||[]).forEach(t=>{TAGN[t]=(TAGN[t]||0)+1;}));
+  const takenTags = new Set();
+  taken.forEach(n=>{
+    const a = currentAugments().filter(x=>x.name===n)[0];
+    if(a) (a.riot_tags||[]).filter(t=>TAGN[t]<=60).forEach(t=>takenTags.add(t));
+  });
+
+  const out = [];
+  currentAugments().forEach(a=>{
+    if(taken.indexOf(a.name)>=0) return;
+    if(ban.has(a.name)) return;
+    const why = [];
+    let score = 0;
+    (a.mentions_traits||[]).forEach(t=>{
+      if(traitNames.has(t)){ score += 5; why.push({w:'強', t:'発動中の '+t+' を名指ししている'}); }
+    });
+    (a.mentions_units||[]).forEach(u=>{
+      if(unitNames.has(u)){ score += 5; why.push({w:'強', t:'構成の '+u+' を名指ししている'}); }
+    });
+    if(carryAxis && (a.axis||[]).indexOf(carryAxis)>=0){
+      score += 3; why.push({w:'中', t:'キャリーの '+carryAxis+' に乗る効果'});
+    }
+    if((a.axis||[]).indexOf('耐久')>=0){ score += 1; why.push({w:'弱', t:'前衛の耐久に効く'}); }
+    if((a.axis||[]).indexOf('アイテム')>=0){ score += 1; why.push({w:'弱', t:'アイテムが増える'}); }
+    if(takenTags.size && (a.riot_tags||[]).some(t=>takenTags.has(t))){
+      score += 2; why.push({w:'弱', t:'取ったオーグメントと同じ系統（Riot のタグ）'});
+    }
+    if(!why.length) return;
+    out.push({aug:a, score:score, why:why});
+  });
+  const RANK = {Prismatic:2, Gold:1, Silver:0};
+  out.sort((x,y)=>y.score-x.score
+    || (RANK[y.aug.rarity]||0)-(RANK[x.aug.rarity]||0)
+    || x.aug.name.localeCompare(y.aug.name));
+  return limit ? out.slice(0, limit) : out;
+}
+
+/* 取ったオーグメントから、構成をどう変えると噛み合うかを出す。
+   「この構成が強い」ではなく「取ったものが活きる形はこれ」という言い方にする。 */
+function suggestCompChanges(taken, ctx){
+  const out = [];
+  const have = new Set((ctx.units||[]).map(u=>u.name));
+  const activeTraits = new Set(ctx.traits||[]);
+  taken.forEach(n=>{
+    const a = currentAugments().filter(x=>x.name===n)[0];
+    if(!a) return;
+    (a.mentions_traits||[]).forEach(t=>{
+      if(activeTraits.has(t)) return;
+      const members = T.units.filter(u=>(u.traits||[]).indexOf(t)>=0 && u.purchasable!==false);
+      const missing = members.filter(u=>!have.has(u.name));
+      out.push({aug:a.name, kind:'trait', target:t,
+        text: n+' は '+t+' のためのオーグメント。いまの構成では '+t+' が発動していない。',
+        add: missing.slice(0,6).map(u=>u.name)});
+    });
+    (a.mentions_units||[]).forEach(u=>{
+      if(have.has(u)) return;
+      out.push({aug:a.name, kind:'unit', target:u,
+        text: n+' は '+u+' を名指ししている。いまの構成に居ない。',
+        add: [u]});
+    });
+  });
+  return out;
+}
+
+/* ================= 対戦中: 取ったオーグメント → 次の一手 =================
+   試合中に素早く引くための画面。手数を最小にしてある:
+     1. キャリーを選ぶ（構成は自動で組む）
+     2. 取ったオーグメントを検索して押す
+   これだけで「次の候補」と「構成をどう変えると噛み合うか」が出る。
+
+   ★ 規約について ★
+   ここで使うのは**試合前から手元にある静的データ**だけ。
+   相手の盤面を自動で読むこと（Scouting）もリアルタイムの自動助言もしない。
+   相手の情報が要る「配置」タブも、入力は手打ちのまま（docs/03 §5）。 */
+/* ================= オーグメントの効果を数値に乗せる =================
+   分類は Python（src/engine/augments.py）で済ませてあり、
+   ここは足すだけ。ルールを2箇所に書くと必ずずれるので。
+
+   ★ 一番大きな前提（未検証）★
+   オーグメントには「選んだユニット1体だけに効くもの」と「チーム全体に効くもの」が
+   混ざっているが、配信データにその区別は無い。
+   ここでは**選んだユニットに全部乗る**とみなす。チーム全体向けのものは
+   キャリー1体で見ると過大になる。 */
+function sumAugStats(names){
+  const out = {frac:{}, add:{}, pct_pt:{},
+               applied:[], conditional:[], unmodeled:[], unknown:[]};
+  names.forEach(function(n){
+    const a = currentAugments().filter(x=>x.name===n)[0];
+    if(!a || !a.stat) return;
+    ['frac','add','pct_pt'].forEach(function(m){
+      Object.keys(a.stat[m]||{}).forEach(function(k){
+        out[m][k] = (out[m][k]||0) + a.stat[m][k];
+      });
+    });
+    ['applied','conditional','unmodeled','unknown'].forEach(function(k){
+      (a.stat[k]||[]).forEach(function(x){ out[k].push(x); });
+    });
+  });
+  return out;
+}
+
+/* ★ クリ率のポイントは尺度が2つ混ざっている ★
+   Riot の CritChance は同じ「+25%」を 25 で配るものと 0.25 で配るものがある
+   （DA_JeweledLotus_II = 25 / Mace's Will = 0.25）。
+   1 を超える値はパーセントそのものとみなして 100 で割る。
+   CritDamage は 0.1（＝倍率 +0.1）で来るので、この規則でそのまま通る。 */
+function pctPtToFrac(v){ return !v ? 0 : (v > 1 ? v/100 : v); }
+
+/* ステータスの見積もり。combat.py と同じ順序で掛ける。
+   厳密な再実装ではなく「どれだけ動くか」を見るためのもの。
+   正確な値が要るときは Python 側（src/engine/combat.py）が正本。 */
+function applyAugToUnit(unit, st){
+  const base = unit.stars && unit.stars['2'] ? unit.stars['2'] : {};
+  const pp = st.pct_pt || {};
+  const hp = (base.hp||0) * (1 + (st.frac.hp||0)) + (st.add.hp||0);
+  const ad = (base.ad||0) * (1 + (st.frac.ad||0));
+  const ap = 100 * (1 + (st.frac.ap||0));
+  const as_ = (unit.base && unit.base.attackSpeed || 0) * (1 + (st.frac.as||0));
+  const amp = (st.frac.damage_amp||0);
+  const dur = Math.max(0, Math.min(0.9, st.frac.durability||0));
+  // ★ pct_pt を集計しておいて捨てていた ★
+  // sumAugStats は pct_pt を足しているのに、ここで一度も読んでいなかった。
+  // そのためクリ率オーグメント（Prismatic の Jeweled Lotus II = +25%）を取ると、
+  // 下の内訳には「計算に入れた（1件）」と出るのに前後表が空、という状態になっていた。
+  // 数値化できたものは必ず表に出す。出さないなら「入れた」と書いてはいけない。
+  const crit = Math.min(1, (unit.base&&unit.base.critChance||0.25) + pctPtToFrac(pp.crit));
+  const critMult = (unit.base&&unit.base.critMultiplier||1.4) + pctPtToFrac(pp.crit_mult);
+  return {hp:Math.round(hp), ad:Math.round(ad*10)/10, ap:Math.round(ap),
+          as:Math.round(as_*1000)/1000, amp:amp, durability:dur,
+          crit:crit, critMult:Math.round(critMult*100)/100,
+          armor:(unit.base&&unit.base.armor||0)+(st.add.armor||0),
+          mr:(unit.base&&unit.base.magicResist||0)+(st.add.mr||0)};
+}
+
+function augEffectCard(unit, takenNames){
+  const c = el('div','card');
+  c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
+  c.appendChild(el('h2',null,'取ったオーグメントでキャリーがどう変わるか — '+unit.name));
+  if(!takenNames.length){
+    c.appendChild(el('div','note','オーグメントを取ると、ここに数値の変化が出る。'));
+    return c;
+  }
+  const st = sumAugStats(takenNames);
+  const before = applyAugToUnit(unit, {frac:{},add:{},pct_pt:{}});
+  const after = applyAugToUnit(unit, st);
+
+  const rows = [
+    ['体力', before.hp, after.hp, ''],
+    ['攻撃力', before.ad, after.ad, ''],
+    ['呪文力', before.ap, after.ap, ''],
+    ['攻撃速度', before.as, after.as, ''],
+    ['物理防御', before.armor, after.armor, ''],
+    ['魔法防御', before.mr, after.mr, ''],
+    ['ダメージ増幅', Math.round(before.amp*100)+'%', Math.round(after.amp*100)+'%', ''],
+    ['被ダメージ軽減', Math.round(before.durability*100)+'%', Math.round(after.durability*100)+'%', ''],
+    ['クリ率', Math.round(before.crit*100)+'%', Math.round(after.crit*100)+'%', ''],
+    ['クリ倍率', '×'+fmt(before.critMult), '×'+fmt(after.critMult), ''],
+  ].filter(r=>String(r[1])!==String(r[2]));
+
+  if(!rows.length){
+    c.appendChild(el('div','note',
+      '取ったオーグメントに、このツールが数値化できる戦闘ステータスが無い。'
+      +'下の内訳を見ると、何が入らなかったかが分かる。'));
+  } else {
+    const tbl=el('table'), th=el('thead'), tr=el('tr');
+    ['項目','オーグメント無し','取った後'].forEach(function(x){
+      const e=el('th',null,x); e.style.cursor='default'; tr.appendChild(e);});
+    th.appendChild(tr); tbl.appendChild(th);
+    const tb=el('tbody');
+    rows.forEach(function(r){
+      const row=el('tr');
+      row.appendChild(el('td',null,r[0]));
+      row.appendChild(el('td','num',String(r[1])));
+      const td=el('td','num',String(r[2]));
+      td.style.color='var(--ok)';
+      row.appendChild(td);
+      tb.appendChild(row);
+    });
+    tbl.appendChild(tb);
+    const w=el('div','tablewrap'); w.appendChild(tbl); c.appendChild(w);
+  }
+
+  function block(title, arr, color, desc){
+    if(!arr || !arr.length) return;
+    const h=el('div'); h.style.marginTop='10px';
+    const b=el('b',null,title+'（'+arr.length+'件）');
+    if(color) b.style.color=color;
+    h.appendChild(b); c.appendChild(h);
+    if(desc) c.appendChild(el('div','note',desc));
+    const ul=el('div','note');
+    ul.innerHTML = arr.map(function(x){ return '・'+String(x).replace(/</g,'&lt;'); }).join('<br>');
+    c.appendChild(ul);
+  }
+  block('計算に入れた', st.applied, 'var(--ok)');
+  block('条件が判定できないので入れていない', st.conditional, 'var(--warn)',
+        '相手依存・選択依存・試合の進み方に依存するもの。この分だけ数値は実態とずれる。');
+  block('効果は分かるがモデルに無い', st.unmodeled, 'var(--warn)',
+        '回復やシールド。単体のダメージ計算には出てこない。');
+  block('意味を特定できていない', st.unknown, 'var(--bad)');
+
+  const pre=el('div','note');
+  pre.innerHTML='<b>前提</b>: オーグメントには「選んだユニット1体だけに効くもの」と'
+    +'「チーム全体に効くもの」が混ざっているが、配信データにその区別は無い。'
+    +'ここでは<b>選んだユニットに全部乗る</b>とみなしている。'
+    +'チーム全体向けのものは、キャリー1体で見ると過大になる。';
+  c.appendChild(pre);
+  return c;
+}
+
+let liveState = null;
+
+function renderLive(m){
+  if(!liveState) liveState = {carryApi:null, size:8, taken:[]};
+  if(!liveState.carryApi){
+    liveState.carryApi = carrySel ||
+      T.units.slice().sort((a,b)=>b.stars['2'].auto_dps-a.stars['2'].auto_dps)[0].apiName;
+  }
+
+  const ctl=el('div','controls');
+  const sel=el('select');
+  T.units.slice().sort((a,b)=>b.cost-a.cost||a.name.localeCompare(b.name))
+    .forEach(u=>sel.appendChild(new Option(u.name+' (c'+u.cost+')', u.apiName)));
+  sel.value=liveState.carryApi;
+  const size=el('select');
+  [6,7,8,9,10].forEach(n=>size.appendChild(new Option('盤面 '+n+' 体',n)));
+  size.value=String(liveState.size);
+  const q=el('input'); q.type='search';
+  q.placeholder='取ったオーグメントを検索して押す';
+  const reset=el('button',null,'取ったものをクリア');
+  reset.style.cssText='background:var(--panel2);color:var(--fg);border:1px solid var(--line);'
+    +'border-radius:5px;padding:4px 10px;cursor:pointer';
+  ctl.append(sel, size, q, reset);
+  m.appendChild(ctl);
+
+  const note=el('div','note');
+  note.innerHTML='<b>キャリーを選んで、取ったオーグメントを押すだけ。</b>'
+    +'構成は自動で組む。<br>'
+    +'<b>ここは「順位が上がる順」ではない。</b>噛み合いの根拠が何本あるかで並べている '
+    +'── オーグメントの組み合わせ別の実測成績は、どのデータ源にも存在しないため。'
+    +'根拠は1本ずつ出すので、納得できないものは無視してよい。';
+  m.appendChild(note);
+
+  const hits=el('div'); m.appendChild(hits);
+  const box=el('div'); m.appendChild(box);
+
+  function ctx(){
+    const comp = solve(liveState.carryApi, liveState.size, {top:1})[0];
+    const carry = UNIT_MAP[liveState.carryApi];
+    if(!comp) return {units:[], traits:[], carry:carry, taken:liveState.taken};
+    return {units: comp.units, carry: carry, comp: comp,
+            traits: (comp.active||[]).map(a=>a.name), taken: liveState.taken};
+  }
+
+  function drawSearch(){
+    hits.innerHTML='';
+    const term=q.value.trim().toLowerCase();
+    if(!term) return;
+    const found=currentAugments()
+      .filter(a=>(a.name||'').toLowerCase().indexOf(term)>=0)
+      .filter(a=>liveState.taken.indexOf(a.name)<0).slice(0,12);
+    if(!found.length){ hits.appendChild(el('div','note','見つからない')); return; }
+    const w=el('div'); w.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:6px 0';
+    found.forEach(a=>{
+      const b=el('button',null,a.name+'（'+(a.rarity||'?')+'）');
+      b.style.cssText='background:var(--panel2);color:var(--fg);border:1px solid var(--line);'
+        +'border-radius:5px;padding:6px 10px;cursor:pointer;font-size:13px';
+      b.onclick=()=>{ liveState.taken.push(a.name); q.value=''; hits.innerHTML=''; draw(); };
+      w.appendChild(b);
+    });
+    hits.appendChild(w);
+  }
+
+  function draw(){
+    const c = ctx();
+    box.innerHTML='';
+
+    // --- 取ったもの ---
+    const t=el('div','card');
+    t.style.position='static'; t.style.maxHeight='none'; t.style.marginBottom='12px';
+    t.appendChild(el('h2',null,'取ったオーグメント（'+liveState.taken.length+'）'));
+    if(!liveState.taken.length){
+      t.appendChild(el('div','note','まだ無い。上の検索から押して足す。'));
+    } else {
+      const w=el('div'); w.style.cssText='display:flex;flex-wrap:wrap;gap:6px';
+      liveState.taken.forEach((n,i)=>{
+        const a=currentAugments().filter(x=>x.name===n)[0]||{};
+        const sp=el('span','tag hit',(i+1)+'. '+n+'（'+(a.rarity||'?')+'） ×');
+        sp.style.cursor='pointer'; sp.title='押すと外す';
+        sp.onclick=()=>{ liveState.taken.splice(i,1); draw(); };
+        w.appendChild(sp);
+      });
+      t.appendChild(w);
+      const ban=[...bannedBy(liveState.taken)];
+      if(ban.length){
+        const d=el('div','note'); d.style.color='var(--bad)';
+        d.textContent='これでもう取れない: '+ban.join(' / ');
+        t.appendChild(d);
+      }
+    }
+    box.appendChild(t);
+
+    // --- オーグメントの効果 ---
+    box.appendChild(augEffectCard(UNIT_MAP[liveState.carryApi], liveState.taken));
+
+    // --- 構成の変更 ---
+    const chg = suggestCompChanges(liveState.taken, c);
+    if(chg.length){
+      const g=el('div','card');
+      g.style.position='static'; g.style.maxHeight='none'; g.style.marginBottom='12px';
+      g.appendChild(el('h2',null,'構成をどう変えると噛み合うか'));
+      g.appendChild(el('div','note',
+        '取ったオーグメントが名指ししているトレイト／ユニットが、いまの構成に無い場合だけ出る。'
+        +'「この構成が強い」ではなく「取ったものが活きる形はこれ」という意味。'));
+      chg.forEach(x=>{
+        const d=el('div'); d.style.margin='8px 0';
+        d.appendChild(el('div',null,x.text));
+        if(x.add.length){
+          const w=el('div'); w.style.cssText='display:flex;flex-wrap:wrap;gap:5px;margin-top:4px';
+          w.appendChild(el('span','dim','候補: '));
+          x.add.forEach(n=>{
+            const u=T.units.filter(y=>y.name===n)[0];
+            const sp=el('span','tag');
+            if(u){ sp.appendChild(unitIcon(u,20)); }
+            sp.appendChild(document.createTextNode(' '+n+(u?(' c'+u.cost):'')));
+            sp.style.cssText='display:inline-flex;align-items:center;gap:4px';
+            w.appendChild(sp);
+          });
+          d.appendChild(w);
+        }
+        g.appendChild(d);
+      });
+      box.appendChild(g);
+    }
+
+    // --- 次の候補 ---
+    const rec = recommendAugments(c, 15);
+    const r=el('div','card');
+    r.style.position='static'; r.style.maxHeight='none'; r.style.marginBottom='12px';
+    r.appendChild(el('h2',null,'次に取るなら（噛み合いの根拠がある順）'));
+    const sub=el('div','note');
+    sub.innerHTML='いまの構成: '
+      + (c.units||[]).map(u=>u.name).join(' / ')
+      + '<br>発動中: ' + (c.traits||[]).join(' / ');
+    r.appendChild(sub);
+    if(!rec.length){
+      r.appendChild(el('div','note','噛み合いの根拠があるものが見つからない。'));
+    } else {
+      const tbl=el('table'), th=el('thead'), tr=el('tr');
+      ['噛み合い','レアリティ','オーグメント','根拠'].forEach(x=>{
+        const e=el('th',null,x); e.style.cursor='default'; tr.appendChild(e);});
+      th.appendChild(tr); tbl.appendChild(th);
+      const tb=el('tbody');
+      rec.forEach(x=>{
+        const row=el('tr');
+        row.appendChild(el('td',null,whySummary(x.why)));
+        row.appendChild(el('td',null,x.aug.rarity||'?'));
+        row.appendChild(el('td',null,x.aug.name));
+        row.appendChild(whyCell(x.why));
+        tb.appendChild(row);
+      });
+      tbl.appendChild(tb);
+      const w=el('div','tablewrap'); w.appendChild(tbl); r.appendChild(w);
+      r.appendChild(el('div','note',
+        '並びは「強＞中＞弱」の重み付き。強＝Riot の説明文がこの構成を名指ししている、'
+        +'中＝効果の軸がキャリーのスケールと一致、弱＝その他の噛み合い。'
+        +'これは噛み合いの本数であって強さの順位ではない。'));
+    }
+    box.appendChild(r);
+  }
+
+  sel.onchange=()=>{ liveState.carryApi=sel.value; carrySel=sel.value; draw(); };
+  size.onchange=()=>{ liveState.size=parseInt(size.value,10); draw(); };
+  q.oninput=drawSearch;
+  reset.onclick=()=>{ liveState.taken=[]; draw(); };
+  draw();
+}
+
+let augSel = null;
+
+function renderAugments(m){
+  const ctl=el('div','controls');
+  const q=el('input'); q.type='search'; q.placeholder='オーグメント名で絞り込み';
+  const r=el('select'); r.appendChild(new Option('全レアリティ',''));
+  ['Silver','Gold','Prismatic'].forEach(x=>r.appendChild(new Option(x,x)));
+  // 配信データには旧セットの同名レコードも混ざっている。既定では現行だけ出す。
+  const eng=el('select');
+  eng.appendChild(new Option('現行エンジン（Set18）','current'));
+  eng.appendChild(new Option('旧セット由来のレコードも含む',''));
+  ctl.append(q,r,eng);
+  const count=el('span','dim'); ctl.appendChild(count);
+  m.appendChild(ctl);
+
+  const note=el('div','note');
+  const uniq=new Set(T.augments.map(a=>a.name)).size;
+  const cur=T.augments.filter(a=>a.engine==='current');
+  const unnamed=cur.filter(a=>a.unnamed_values>0).length;
+  const recov=T.augments.filter(a=>a.recovered).length;
+  const unfilled=cur.filter(a=>a.desc_unfilled>0).length;
+  const withEx=cur.filter(a=>a.excludes&&a.excludes.length).length;
+  const withTag=cur.filter(a=>a.riot_tags&&a.riot_tags.length).length;
+  note.innerHTML =
+    '配信データには <b>'+T.augments.length+' レコード</b>あるが、名前の実体は <b>'+uniq+' 種</b>。'
+    + '現行エンジン（apiName が <code>DA_</code>）が '+cur.length+' 件で、残りは旧セット由来の同名レコード。'
+    + '<br>効果の変数名は3段で復元してある（現在 <b>'+recov+' 件</b>で復元済み、'
+    + '<b>'+unnamed+' 件</b>にまだ名前不明の数値が残る）。'
+    + '説明文には実数値を埋めてある（埋められなかった箇所は <code>@名前@</code> のまま。'
+    + '<b>'+unfilled+' 件</b>）。'
+    + '<br><b>レアリティは Riot 自身のタグ（map22 の ItemTags）で確定している。</b>'
+    + '画像ファイル名から推測していたときは不明79件・食い違い15件があったが、いまは0件。'
+    + '<br><b>行をクリックすると「次の一手」を出す。</b>'
+    + '排他 '+withEx+' 件 / 系統分け '+withTag+' 件が Riot の一次データから取れている。';
+  m.appendChild(note);
+
+  const warn=el('div','note');
+  warn.style.color='var(--warn)';
+  warn.innerHTML='<b>「こっちの方が順位が上がる」は出さない。</b>'
+    + 'オーグメントの組み合わせ別の実測成績は、どのデータ源にも存在しない'
+    + '（op.gg のオーグメントページは編集部のティア表で、平均順位も試合数も持っていない）。'
+    + 'ステージ（2-1 / 3-2 / 4-2）ごとの出現表も Set18 のデータには無い。'
+    + 'なので出すのは<b>「矛盾しない次の一手」</b>まで ── '
+    + '取れなくなるもの（Riot の排他データ）と、同じ系統のもの（Riot 自身のタグ）。';
+  m.appendChild(warn);
+
+  const detail=el('div'); m.appendChild(detail);
+  const box=el('div'); m.appendChild(box);
+  const ORDER={Silver:0,Gold:1,Prismatic:2};
+
+  function byName(n){ return T.augments.filter(a=>a.name===n && a.engine==='current')[0]
+                          || T.augments.filter(a=>a.name===n)[0]; }
+
+  // 同じ系統 = Riot のタグを共有する。ただし全体に付く広いタグは除く。
+  // 広いものを混ぜると「ほぼ全部が同じ系統」になって使い物にならない。
+  const TAG_COUNT = {};
+  T.augments.forEach(a=>(a.riot_tags||[]).forEach(t=>{TAG_COUNT[t]=(TAG_COUNT[t]||0)+1;}));
+  function narrowTags(a){ return (a.riot_tags||[]).filter(t=>TAG_COUNT[t] <= 60); }
+
+  function showDetail(a){
+    augSel = a.name;
+    detail.innerHTML='';
+    const c=el('div','card');
+    c.style.position='static'; c.style.maxHeight='none'; c.style.margin='12px 0';
+    c.appendChild(el('h2',null,'次の一手 — '+a.name+'（'+(a.rarity||'不明')+'）'));
+    if(a.desc) c.appendChild(el('div','note',a.desc));
+
+    if(a.tag_labels && a.tag_labels.length){
+      const d=el('div'); d.style.margin='6px 0';
+      d.appendChild(el('span','dim','効果の種類（推定）： '));
+      a.tag_labels.forEach(x=>d.appendChild(el('span','tag hit',x)));
+      c.appendChild(d);
+      c.appendChild(el('div','note',
+        'Riot のタグには名前が入っていないので、説明文との一致率で裏を取れたものだけ名前を付けている。'
+        + '裏が取れなかったタグは名前を出さず、下の「同じ系統」でだけ使っている。'));
+    }
+
+    function block(title, names, color, desc){
+      const h=el('div'); h.style.marginTop='10px';
+      const b=el('b',null,title+'（'+names.length+'件）');
+      if(color) b.style.color=color;
+      h.appendChild(b); c.appendChild(h);
+      if(desc) c.appendChild(el('div','note',desc));
+      if(!names.length){ c.appendChild(el('div','note','該当なし')); return; }
+      const w=el('div'); w.style.cssText='display:flex;flex-wrap:wrap;gap:5px;margin-top:5px';
+      names.forEach(n=>{
+        const other=byName(n);
+        const t=el('span','tag'+(color==='var(--bad)'?'':' hit'),
+                   n+(other&&other.rarity?(' ('+other.rarity+')'):''));
+        t.style.cursor='pointer';
+        t.onclick=()=>{ if(other){ showDetail(other); window.scrollTo(0,0); } };
+        w.appendChild(t);
+      });
+      c.appendChild(w);
+    }
+
+    block('これを取ると取れなくなる', a.excludes||[], 'var(--bad)',
+          'Riot の排他データ（map22 の MutuallyExclusiveItems）。推測ではない。');
+
+    const mine = narrowTags(a);
+    // 排他になっているものは「同じ系統」から外す。取れないものを候補に並べない。
+    const banned = new Set(a.excludes||[]);
+    const same = mine.length
+      ? T.augments.filter(x=>x.engine==='current' && x.name!==a.name
+          && !banned.has(x.name)
+          && narrowTags(x).some(t=>mine.indexOf(t)>=0)).map(x=>x.name)
+      : [];
+    const uniqSame = same.filter((v,i)=>same.indexOf(v)===i).sort().slice(0,40);
+    block('同じ系統（Riot が同じタグに入れている）', uniqSame, null,
+          'タグの意味は分からなくても、**同じ箱に入っている**ことは Riot の一次データ。'
+          .replace(/\*\*/g,'') + '噛み合いを探す起点になる。'
+          + (mine.length ? '' : 'このオーグメントには絞り込めるタグが無い。'));
+
+    // 同レアリティで排他になっていない＝素直に次に取れるもの、は件数が多すぎるので出さない。
+    c.appendChild(el('div','note',
+      'ここに出ているのは「矛盾しないか」「同じ箱か」だけ。どれが強いかは出していない。'
+      + 'オーグメントの組み合わせ別の実測が無いので、順位を付けると根拠のない数字になる。'));
+    detail.appendChild(c);
+  }
+
+  function draw(){
+    const term=q.value.trim().toLowerCase();
+    const rows=T.augments.filter(a=>(!r.value||a.rarity===r.value) &&
+      (!eng.value||a.engine===eng.value) &&
+      (!term||(a.name||'').toLowerCase().includes(term)));
+    count.textContent=`${rows.length} 件`;
+    box.innerHTML='';
+    const tbl=mkTable([
+      {key:'rarity',label:'レアリティ',render:a=>a.rarity||'不明'},
+      {key:'name',label:'オーグメント'},
+      {key:'chain',label:'次の一手',render:a=>{
+        const bits=[];
+        if(a.excludes&&a.excludes.length) bits.push('排他'+a.excludes.length);
+        if(a.tag_labels&&a.tag_labels.length) bits.push(a.tag_labels.join('・'));
+        const sp=el('span','dim',bits.join(' / ')||'—');
+        return sp;
+      }},
+      {key:'eff',label:'効果数値',wrap:true,
+       render:a=>{
+         const named=Object.entries(a.effects).map(([k,v])=>`${k}=${fmt(v)}`).join('  ');
+         if(!a.unnamed_values) return named||'—';
+         const w=`（名前不明の数値 ${a.unnamed_values} 個）`;
+         return named ? named+'  '+w : w;
+       }},
+      {key:'desc',label:'説明',wrap:true},
+    ], sortRows(rows,sort.augments,{rarity:a=>ORDER[a.rarity]??9}), sort.augments,
+      k=>{ if(sort.augments.key===k) sort.augments.dir*=-1; else {sort.augments.key=k; sort.augments.dir=1;} draw(); });
+    // 行クリックで詳細
+    const bodyRows=tbl.querySelectorAll('tbody tr');
+    const shown=sortRows(rows,sort.augments,{rarity:a=>ORDER[a.rarity]??9});
+    bodyRows.forEach((tr,i)=>{
+      tr.style.cursor='pointer';
+      tr.onclick=()=>showDetail(shown[i]);
+      if(shown[i] && shown[i].name===augSel) tr.style.outline='1px solid var(--accent)';
+    });
+    // 他の表と同じく横スクロールできる包みに入れる。
+    // ここだけ素で append していたので、狭い画面で列が切れていた。
+    const wrapA=el('div','tablewrap'); wrapA.appendChild(tbl); box.appendChild(wrapA);
+  }
+  q.oninput=r.onchange=eng.onchange=draw; draw();
+  const first=T.augments.filter(a=>a.engine==='current'&&a.excludes&&a.excludes.length)[0];
+  if(first) showDetail(first);
+}
+
+/* ================= 先に使う構成 =================
+   このツールの目的そのもの。
+   実測（op.gg）は集計が終わるまで前のパッチのままなので、実測だけ見ていると必ず出遅れる。
+   パッチノートは公開と同時に手に入るので、そこから3つを掛け合わせる:
+     1. パッチの追い風   … 今回のパッチでその構成の駒がどれだけ上方修正されたか
+     2. 組みやすさ       … 合計コスト・キャリーのコスト・プール枚数・5コストの数
+     3. まだ空いているか … 実測の使用率が中央値より低いか
+
+   ★ 言わないこと ★
+   「強い」「何位になる」は出さない。バフ量と順位の関係を測るには複数パッチ分の実測が要る。
+   言えるのは「追い風が吹いていて、まだ空いている」まで。
+   使用率が低い理由が「弱いから」の可能性も区別できないので、
+   バフの中身を必ず併記して最後は人が判断する形にする。 */
+function renderForecast(m){
+  const F = T.forecast;
+  const PC = T.patch_changes;
+  if(!F || !(F.rows||[]).length){
+    m.innerHTML='<div class="empty">パッチの変更データがありません'
+      +'（python src/patch_changes.py → python src/comp_forecast.py）</div>';
+    return;
+  }
+
+  const ctl=el('div','controls');
+  const sortSel=el('select');
+  // 「空き」は総合スコアから外した（3軸目を派生とゴールドに置き換えたため）。
+  // 並べ替えの選択肢としては残す（使われていない構成を探す用途がある）。
+  [['score','総合（追い風×組みやすさ×派生×ゴールド）'],['tailwind','追い風が大きい順'],
+   ['build','組みやすい順'],['derive','派生が多い順（潰されにくい）'],
+   ['gold','ゴールドが安い順'],['openness','空いている順']]
+    .forEach(x=>sortSel.appendChild(new Option(x[1],x[0])));
+  const onlyOpen=el('label');
+  onlyOpen.style.cssText='display:inline-flex;align-items:center;gap:5px;color:var(--dim)';
+  const cb=el('input'); cb.type='checkbox'; cb.checked=true;
+  onlyOpen.append(cb, document.createTextNode('まだ空いているものだけ（中央値未満）'));
+  ctl.append(sortSel, onlyOpen);
+  m.appendChild(ctl);
+
+  const note=el('div','note');
+  note.innerHTML =
+    '<b>実測だけを見ていると必ず出遅れる。</b>op.gg の平均順位は集計が終わるまで'
+    + '前のパッチのままだから。一方パッチノートは公開と同時に手に入る。'
+    + '<br>だからここでは <b>パッチの追い風 × 組みやすさ × 派生の多さ × ゴールド</b> で並べている。'
+    + 'パッチ <b>' + (F.patch || '?') + '</b> の変更 '
+    + ((PC && PC.total_changes) || '?') + ' 件から計算。'
+    + '<br><b>「まだ空いているか」は総合スコアから外した。</b>使用率は実測（前パッチ）で、'
+    + '低い理由が「気づかれていない」のか「単に弱い」のか区別できないため、'
+    + '点数に混ぜず<b>絞り込みと並べ替えだけ</b>に使う。';
+  m.appendChild(note);
+
+  const warn=el('div','note');
+  warn.style.color='var(--warn)';
+  warn.innerHTML='<b>「強い」とは言っていない。</b>'
+    + 'バフの量と順位の関係は測れていない（それには複数パッチ分の実測が要る）。'
+    + 'ここで言えるのは「<b>追い風が吹いていて、まだ空いている</b>」まで。'
+    + '使用率が低い理由が「単に弱いから」である可能性も区別できない。'
+    + 'だから下の表には<b>バフの中身</b>を必ず出している。最後は自分で判断すること。'
+    + '重み（キャリー3倍・トレイト2倍・1件あたり上限35%）はすべて<b>未検証</b>。';
+  m.appendChild(warn);
+
+  // 総合スコアの重みが未検証であることは、エンジン側が weights_unverified で明示してくる。
+  // 隠すのが一番危ないので、立っているあいだは必ず画面に出す。
+  const W = F.score_weights;
+  if((F.rows||[]).some(function(r){ return r.weights_unverified; })){
+    const wu=el('div','note');
+    wu.style.color='var(--warn)';
+    wu.innerHTML='<b>総合スコアの重みは未検証。</b>'
+      + (W ? '追い風 ' + W.tailwind + ' / 組みやすさ ' + W.build
+             + ' / 派生 ' + W.derive + ' / ゴールド ' + W.gold
+             + '（派生の満点 hard ' + W.hard_full + '・soft ' + W.soft_full
+             + '、ゴールドは ' + W.gold_pivot + 'G を基準に ' + W.gold_span + 'G 幅で正規化）。' : '')
+      + '実測で決めた値ではないので、<b>総合の順位そのものより各列の生の数字を見ること</b>。';
+    m.appendChild(wu);
+  }
+
+  const box=el('div'); m.appendChild(box);
+
+  function draw(){
+    let rows = (F.rows||[]).slice();
+    // ★ 公開版ではこの絞り込みが全行を消していた ★
+    // 公開版は op.gg の集計値（crowding）を落としてあるので、
+    // `undefined < 1.0` が全行 false になり、既定チェック状態のまま
+    // 「該当なし」だけの画面になっていた。
+    // 使用率が無い版では絞り込み自体が意味を持たないので素通しする。
+    if(cb.checked) rows = rows.filter(r=>r.crowding === undefined || r.crowding < 1.0);
+    const k = sortSel.value;
+    rows.sort(function(a,b){
+      if(k==='build') return b.build.score - a.build.score;
+      if(k==='openness') return (a.crowding||9) - (b.crowding||9);
+      if(k==='tailwind') return b.tailwind - a.tailwind;
+      // 派生は hard（1段も落とさない入れ替え）を主、soft を同点の裁定に使う
+      if(k==='derive') return (dv(b).hard - dv(a).hard) || (dv(b).soft - dv(a).soft);
+      if(k==='gold') return gd(a).all_2star - gd(b).all_2star;
+      return b.score - a.score;
+    });
+    box.innerHTML='';
+    if(!rows.length){ box.appendChild(el('div','empty','該当なし')); return; }
+
+    rows.slice(0,20).forEach(function(r){
+      const c=el('div','card');
+      c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
+      const head=el('h2');
+      const u=UNIT_MAP[r.carryApi];
+      if(u) head.appendChild(unitIcon(u,26));
+      head.appendChild(document.createTextNode(' '+r.carry+'（c'+r.cost+'）'));
+      // キャリーが後衛に届くかは構成の性格そのものなので、名前の横に必ず出す
+      if(u) head.appendChild(backlineTag(u));
+      // 「強いが一本道」は最も効く判断材料なので、見出しの高さで出す
+      const d0=dv(r);
+      if(!d0.missing && d0.hard===0){
+        const b0=el('span','badge bad','一本道（派生0）');
+        b0.title='発動中のトレイトを1段も落とさずに入れ替えられる駒が1つも無い。'
+               + '駒を取られる／引けないと、この構成はそこで止まる。';
+        head.appendChild(b0);
+      }
+      head.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap';
+      c.appendChild(head);
+
+      // 軸を並べる
+      const bar=el('div');
+      bar.style.cssText='display:flex;flex-wrap:wrap;gap:14px;margin:6px 0 10px';
+      function chip(label, val, good){
+        const d=el('div');
+        d.style.cssText='display:flex;flex-direction:column;gap:1px';
+        d.appendChild(el('span','dim',label));
+        const v=el('b',null,val);
+        v.style.fontSize='15px';
+        if(good===true) v.style.color='var(--ok)';
+        if(good===false) v.style.color='var(--bad)';
+        d.appendChild(v);
+        return d;
+      }
+      bar.appendChild(chip('追い風', (r.tailwind>0?'+':'')+Math.round(r.tailwind*100)+'%',
+                           r.tailwind>0));
+      bar.appendChild(chip('組みやすさ', r.build.score.toFixed(2), r.build.score>1.2));
+      // ★ 旧「使われ具合」の chip はここにあった。空きの軸は廃止したので外す。
+      //   使用率そのものはカード末尾に残す（スコアには入らない）。
+      //   代わりに出すのが「派生」と「ゴールド」の2つ。
+      const D=dv(r), G=gd(r);
+      // 色は「0＝一本道だけ赤／3通り以上だけ緑」。中央値は2なので、
+      // 2 を赤にすると普通の構成が全部ダメに見える（最初これで赤くなっていた）。
+      const dchip = chip('派生（1体入れ替え）',
+        D.missing ? 'データなし' : (D.hard + ' 通り' + (D.hard===0 ? '（一本道）' : '')),
+        D.missing ? null : (D.hard===0 ? false : (D.hard>=3 ? true : null)));
+      dchip.title = D.missing
+        ? 'この行に derivations が入っていない（data.js が古い）'
+        : '全トレイトを1段も落とさない1体入れ替えが ' + D.hard + ' 通り。'
+          + 'キャリーのトレイトだけ守る緩い入れ替えなら ' + D.soft + ' 通り。'
+          + '入れ替えが効く枠は ' + D.flex + ' 枠。';
+      bar.appendChild(dchip);
+      if(!D.missing) bar.appendChild(chip('　柔軟な枠', D.flex + ' 枠', D.flex>=2));
+      // 基準はエンジン側の gold_pivot（既定75G）。それより十分安ければ緑、
+      // 基準を超えたら赤。間は色を付けない（連続量なので白黒に割らない）。
+      const piv = (W && W.gold_pivot) || 75, span = (W && W.gold_span) || 30;
+      const gchip = chip('ゴールド（最低〜全2★）',
+        G.missing ? 'データなし' : (G.floor + '〜' + G.all_2star + ' G'),
+        G.missing ? null : (G.all_2star <= piv-span/2 ? true
+                            : (G.all_2star >= piv ? false : null)));
+      gchip.title = G.missing
+        ? 'この行に gold が入っていない（data.js が古い）'
+        : '最低＝キャリーだけ3★相当（コスト×3）＋他は1体ずつ買う場合。'
+          + '全2★＝全員を2★にするまでの購入費。リロール代・利子は含まない。';
+      bar.appendChild(gchip);
+      bar.appendChild(chip('合計コスト', String(r.build.total_cost), r.build.total_cost<=22));
+      bar.appendChild(chip('5コスト', r.build.five_costs+' 体', r.build.five_costs===0));
+      if(r.measured_place) bar.appendChild(chip('実測の平均順位（前パッチ）',
+                                                String(r.measured_place), null));
+      c.appendChild(bar);
+
+      // 使用率は chip から降ろしたが、絞り込みの基準として見えている必要があるので残す。
+      // スコアに入っていないことを毎回書く（入っていると誤解されるのが一番まずい）。
+      if(r.used){
+        const uz=el('div','note');
+        uz.textContent='実測の使用率: 中央値の'+Math.round(r.crowding*100)+'%'
+          + '（' + r.used + ' 試合・前パッチ集計。総合スコアには入れていない）';
+        c.appendChild(uz);
+      }
+
+      // 構成
+      const comp=el('div');
+      comp.style.cssText='display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px';
+      (r.units||[]).forEach(function(n,i){
+        const uu=T.units.filter(x=>x.name===n)[0];
+        const sp=el('span','tag'+(i===0?' hit':''));
+        sp.style.cssText='display:inline-flex;align-items:center;gap:4px';
+        if(uu) sp.appendChild(unitIcon(uu,20));
+        sp.appendChild(document.createTextNode(n+(i===0?' ★':'')));
+        comp.appendChild(sp);
+      });
+      c.appendChild(comp);
+      if((r.traits||[]).length){
+        const tr=el('div','note');
+        tr.textContent='発動: '+r.traits.join(' / ');
+        c.appendChild(tr);
+      }
+
+      // なぜ追い風なのか
+      if((r.why||[]).length){
+        const w=el('div'); w.style.marginTop='8px';
+        w.appendChild(el('b',null,'このパッチで何が変わったか'));
+        const ul=el('div','note');
+        ul.innerHTML = r.why.map(function(x){ return '・'+x; }).join('<br>');
+        w.appendChild(ul);
+        c.appendChild(w);
+      } else {
+        c.appendChild(el('div','note','このパッチでの直接の変更は無い。'));
+      }
+      box.appendChild(c);
+    });
+
+    const foot=el('div','note');
+    foot.innerHTML='「使用率」は実測の試合数を全ユニットの中央値と比べたもの。'
+      + '中央値の100%未満＝平均より使われていない。'
+      + '<b>実測は前のパッチの集計</b>なので、ここが低いのは「まだ気づかれていない」'
+      + 'サインになりうる（が、単に弱いだけの可能性もある）。'
+      + '<br><b>「派生」</b>は、発動中のトレイトを1段も落とさずに1体だけ入れ替えられる通り数。'
+      + '0＝一本道で、その駒を取られた時点で構成が止まる。多いほど駒が被っても曲げて組める。'
+      + '<br><b>「ゴールド」</b>は購入費だけ。<b>リロール代・利子・連勝ボーナスは入っていない</b>ので、'
+      + '実際に必要な額はこれより増える。';
+    box.appendChild(foot);
+  }
+  sortSel.onchange=cb.onchange=draw;
+  draw();
+}
+
+/* ================= ランキング（研究モードのみ） =================
+   「理論値的にこれが一番強いのは何か」を見るための画面。
+
+   ★ 出さないもの ★
+   **順位は出さない。** 実測で確かめたところ、コストを知っている上では
+   理論ダメージは平均順位をほとんど説明しなかった（R² の増分 +0.002）。
+   だからここで言えるのは「理論上どれだけ火力が出るか」までで、
+   「これを使えば何位になる」ではない。
+
+   ★ コスト帯 ★
+   コスト単独で R²=0.55 出る。つまり理論火力の並びは大部分がコストの並びで、
+   74体を一列にしても「高コストが上にいる」しか読み取れない。
+   帯で絞って初めて帯内の比較になるので、絞り込みを必須の道具として置く。 */
+function theoTop(u){
+  const b = (u && u.bis) || [];
+  return b.length ? b[0].total : null;
+}
+function theoBis(u){
+  const b = (u && u.bis) || [];
+  return b.length ? b[0] : null;
+}
+function castsCell(u){
+  // ユニットタブと同じ出し方。撃てないキャリーを撃てる顔で並べない
+  const st = u.stars && u.stars['2'];
+  if(!st || st.casts==null) return el('span','dim','—');
+  if(st.casts>0) return document.createTextNode(st.casts+' 回');
+  const s=el('span',null, st.first_cast ? ('0 回（初回 '+st.first_cast+'秒）') : '0 回');
+  s.style.color='var(--bad)';
+  s.title='8秒の戦闘に初回詠唱が間に合っていない。マナアイテムが要る';
+  return s;
+}
+
+/* 値が無い行は、昇順でも降順でも**末尾に落とす**。
+   sortRows は null を -Infinity として扱うので、素直に使うと
+   「安い順」で “データなし” が1位に来てしまう（0 円だと言っているのと同じ）。
+   欠けているものが上位に紛れるのが一番危ないので、常に下に落とす。 */
+function sinkMissing(rows, acc){
+  if(!acc) return rows;
+  const ok=[], miss=[];
+  rows.forEach(function(r){ (acc(r)==null ? miss : ok).push(r); });
+  return ok.concat(miss);
+}
+
+const RUA = {   // キャリーのランキングの並べ替え
+  rank:u=>u.rank, cost:u=>u.cost, name:u=>u.name,
+  theo:u=>theoTop(u), per:u=>{ const t=theoTop(u); return t==null?null:t/u.cost; },
+  casts:u=>(u.stars&&u.stars['2']?u.stars['2'].casts:null),
+  backline:u=>backlineState(u).rank,
+  items:u=>{ const b=theoBis(u); return b?b.items.join(' / '):''; },
+};
+const RCA = {   // 構成のランキングの並べ替え
+  rank:r=>r.rank, carry:r=>r.carry, cost:r=>r.cost,
+  theo:r=>theoTop(UNIT_MAP[r.carryApi]),
+  tailwind:r=>r.tailwind, build:r=>r.build.score,
+  hard:r=>{ const d=dv(r); return d.missing?null:d.hard; },
+  soft:r=>{ const d=dv(r); return d.missing?null:d.soft; },
+  flex:r=>{ const d=dv(r); return d.missing?null:d.flex; },
+  gold:r=>{ const g=gd(r); return g.missing?null:g.all_2star; },
+  crowd:r=>r.crowding,
+  score:r=>r.score,
+};
+
+function renderRank(m){
+  const P = (T.meta && T.meta.predict) || null;
+  const mo = (P && P.models) || {};
+  const r2cost = mo.cost ? mo.cost.r2 : null;
+  const gain = P ? P.theory_gain_over_cost : null;
+
+  // ★ 言い過ぎないための注意書き。これを外したらこの画面は嘘になる ★
+  const cap=el('div','card');
+  cap.style.position='static'; cap.style.maxHeight='none'; cap.style.marginBottom='12px';
+  cap.appendChild(el('h2',null,'この画面が言えること / 言えないこと'));
+  const capn=el('div','note');
+  capn.innerHTML =
+    '<b>出すのは「理論上どれだけ火力が出るか」まで。何位になるかは出さない。</b>'
+    + '実測と突き合わせたところ、コストを知っている上では理論ダメージは平均順位を'
+    + 'ほとんど説明しなかった（R² の増分 <b>'
+    + (gain==null ? '+0.00' : (gain>=0?'+':'') + gain.toFixed(3)) + '</b>）。'
+    + '<br>一方 <b>コスト単独で R²=' + (r2cost==null ? '0.55' : r2cost.toFixed(2)) + '</b>。'
+    + 'つまりこの並びの大半はコストの並びで、74体を一列にしても'
+    + '「高コストが上にいる」しか読めない。<b>コスト帯で絞ってから比べること。</b>'
+    + '<br>理論火力＝BiS（最良の3アイテム）を持たせて '
+    + (T.meta.fight_duration || 8) + ' 秒戦ったときの合計ダメージ。'
+    + '相手依存のもの（被弾によるマナ生成・回復・シールド・CC・射線）は入っていない。'
+    + 'ここで上位に来るのは「強い構成」ではなく「<b>理論火力が出る組み合わせ</b>」。';
+  cap.appendChild(capn);
+  if(P && P.conclusion){
+    const cc=el('div','note');
+    cc.style.color='var(--warn)';
+    cc.textContent='測定結果: '+P.conclusion;
+    cap.appendChild(cc);
+  }
+  m.appendChild(cap);
+
+  const sw=el('div','controls');
+  const btns=[];
+  [['carry','キャリーのランキング'],['comp','構成のランキング']].forEach(function(x){
+    const b=el('button',null,x[1]);
+    b.className = (rankView===x[0]) ? 'on' : '';
+    b.style.cssText='background:var(--panel2);color:var(--fg);border:1px solid var(--line);'
+      + 'padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px';
+    if(rankView===x[0]){ b.style.background='var(--accent)'; b.style.color='#0d1117';
+                         b.style.borderColor='var(--accent)'; b.style.fontWeight='600'; }
+    b.onclick=function(){ rankView=x[0]; render(); };
+    btns.push(b); sw.appendChild(b);
+  });
+  m.appendChild(sw);
+
+  const box=el('div'); m.appendChild(box);
+  if(rankView==='carry') drawRankCarry(box); else drawRankComp(box);
+}
+
+function drawRankCarry(host){
+  const ctl=el('div','controls');
+  const costSel=el('select');
+  costSel.appendChild(new Option('全コスト（コストが交絡するので注意）',''));
+  [1,2,3,4,5].forEach(function(c){ costSel.appendChild(new Option('コスト '+c+' の中だけで比べる',c)); });
+  costSel.value=rankCostBand;
+  ctl.append(costSel);
+  const cnt=el('span','dim'); ctl.appendChild(cnt);
+  host.appendChild(ctl);
+
+  const tbox=el('div'); host.appendChild(tbox);
+
+  function draw(){
+    rankCostBand=costSel.value;
+    let rows=T.units.filter(function(u){ return theoTop(u)!=null; });
+    if(rankCostBand) rows=rows.filter(function(u){ return String(u.cost)===rankCostBand; });
+    rows=sinkMissing(sortRows(rows, sort.rankCarry, RUA), RUA[sort.rankCarry.key]);
+    rows=rows.map(function(u,i){ return Object.assign({}, u, {rank:i+1}); });
+    cnt.textContent = rows.length+' 体'+(rankCostBand?'（コスト '+rankCostBand+' の帯内順位）':'（全体順位）');
+
+    const cols=[
+      {key:'rank',label:'#',num:true},
+      {key:'cost',label:'C',render:u=>costChip(u.cost)},
+      {key:'name',label:'ユニット',render:u=>{
+        const d=el('span'); d.style.cssText='display:inline-flex;align-items:center;gap:7px';
+        d.appendChild(unitIcon(u,24)); d.appendChild(document.createTextNode(u.name));
+        return d;}},
+      {key:'theo',label:'理論火力（BiS '+(T.meta.fight_duration||8)+'秒）',num:true,render:u=>{
+        const b=theoBis(u); const s=el('span',null,String(theoTop(u)));
+        if(b) s.title='通常 '+b.auto+' / スキル '+b.ability+' / 継続 '+b.burn
+                    + '　攻撃 '+b.attacks+' 回・詠唱 '+b.casts+' 回';
+        return s;}},
+      {key:'per',label:'コスト当たり',num:true,render:u=>Math.round(theoTop(u)/u.cost)},
+      {key:'casts',label:'8秒で詠唱',num:true,render:u=>castsCell(u)},
+      {key:'backline',label:'後衛到達',render:u=>backlineTag(u)},
+      {key:'items',label:'BiS の3アイテム',wrap:true,render:u=>{
+        const b=theoBis(u); return b ? b.items.join(' / ') : '—';}},
+    ];
+    tbox.innerHTML='';
+    tbox.appendChild(mkTable(cols, rows, sort.rankCarry,
+      function(k){ if(sort.rankCarry.key===k) sort.rankCarry.dir*=-1;
+                   else { sort.rankCarry.key=k; sort.rankCarry.dir=-1; } draw(); },
+      null, null));
+
+    const n=el('div','note');
+    n.innerHTML='見出しを押すと並べ替わる。<b>コスト当たり</b>は帯をまたいで比べたいとき用だが、'
+      + 'コストは購入難易度でもあるので「安いほど得」とは限らない。'
+      + '<b>「8秒で詠唱 0 回」のユニットはスキル火力が出ていない</b>'
+      + '（BiS にマナアイテムが入っていればその分は入っている）。'
+      + '<br>後衛到達の印は「跳ぶか」ではなく「<b>誰を狙うか</b>」で判定している。'
+      + '跳んでも狙う相手が敵の塊なら前衛に着地する。';
+    tbox.appendChild(n);
+    tbox.appendChild(backlineGapsNote());
+  }
+  costSel.onchange=draw;
+  draw();
+}
+
+function drawRankComp(host){
+  const F=T.forecast;
+  if(!F || !(F.rows||[]).length){
+    host.innerHTML='<div class="empty">構成データがありません（python src/comp_forecast.py）</div>';
+    return;
+  }
+  const ctl=el('div','controls');
+  const sortSel=el('select');
+  [['score','総合（追い風×組みやすさ×派生×ゴールド）'],
+   ['theo','キャリーの理論火力が高い順'],
+   ['tailwind','パッチの追い風が大きい順'],
+   ['hard','派生が多い順（潰されにくい）'],
+   ['soft','ゆるい派生が多い順'],
+   ['gold','ゴールドが安い順'],
+   ['build','組みやすい順'],
+   ['crowd','まだ使われていない順']].forEach(function(x){
+    sortSel.appendChild(new Option(x[1],x[0]));
+  });
+  // select に無い列（柔軟枠など）で並べ替えたまま戻ってきたときは select を空にしない
+  if([...sortSel.options].some(function(o){ return o.value===sort.rankComp.key; }))
+    sortSel.value = sort.rankComp.key;
+  ctl.appendChild(sortSel);
+  const cnt=el('span','dim'); ctl.appendChild(cnt);
+  host.appendChild(ctl);
+
+  const tbox=el('div'); host.appendChild(tbox);
+
+  // 並べ替えの正本は sort.rankComp の1つだけ。select と見出しクリックの両方から
+  // ここを書き換える（select を正本にすると、select に無い列で並べ替えた瞬間に
+  // 値が '' になって並べ替えが黙って効かなくなる）。
+  function setKey(k){
+    if(sort.rankComp.key===k){ sort.rankComp.dir*=-1; }
+    else { sort.rankComp.key=k;
+           // 安い順・使われていない順だけは小さいほど上
+           sort.rankComp.dir = (k==='gold'||k==='crowd') ? 1 : -1; }
+    if([...sortSel.options].some(function(o){ return o.value===sort.rankComp.key; }))
+      sortSel.value=sort.rankComp.key;
+    draw();
+  }
+
+  function draw(){
+    let rows=sinkMissing(sortRows((F.rows||[]).slice(), sort.rankComp, RCA),
+                         RCA[sort.rankComp.key]);
+    rows=rows.map(function(r,i){ return Object.assign({}, r, {rank:i+1}); });
+    cnt.textContent=rows.length+' 構成';
+
+    const cols=[
+      {key:'rank',label:'#',num:true},
+      {key:'cost',label:'C',render:r=>costChip(r.cost)},
+      {key:'carry',label:'キャリー',render:r=>{
+        const d=el('span'); d.style.cssText='display:inline-flex;align-items:center;gap:6px';
+        const u=UNIT_MAP[r.carryApi];
+        if(u) d.appendChild(unitIcon(u,22));
+        d.appendChild(document.createTextNode(r.carry));
+        if(u) d.appendChild(backlineTag(u,{hideNone:true}));
+        return d;}},
+      {key:'theo',label:'理論火力',num:true,render:r=>{
+        const t=theoTop(UNIT_MAP[r.carryApi]);
+        return t==null ? '—' : String(t);}},
+      {key:'tailwind',label:'追い風',num:true,render:r=>{
+        const s=el('span',null,(r.tailwind>0?'+':'')+Math.round(r.tailwind*100)+'%');
+        if(r.tailwind>0) s.style.color='var(--ok)';
+        return s;}},
+      {key:'hard',label:'派生',num:true,render:r=>{
+        const d=dv(r);
+        if(d.missing) return el('span','dim','—');
+        const s=el('span',null, d.hard+' 通り');
+        if(d.hard===0){ s.style.color='var(--bad)'; s.textContent='0（一本道）';
+          s.title='1段も落とさずに入れ替えられる駒が無い。取られたら止まる'; }
+        return s;}},
+      {key:'soft',label:'ゆるい派生',num:true,render:r=>{
+        const d=dv(r); return d.missing?'—':String(d.soft);}},
+      {key:'flex',label:'柔軟枠',num:true,render:r=>{
+        const d=dv(r); return d.missing?'—':(d.flex+' 枠');}},
+      {key:'gold',label:'ゴールド（最低〜全2★）',num:true,render:r=>{
+        const g=gd(r); return g.missing?'—':(g.floor+'〜'+g.all_2star);}},
+      {key:'crowd',label:'使用率（中央値比）',num:true,render:r=>
+        r.used ? (Math.round(r.crowding*100)+'%') : '—'},
+      {key:'score',label:'総合',num:true,render:r=>r.score.toFixed(2)},
+      {key:'traits',label:'発動トレイト',wrap:true,render:r=>(r.traits||[]).join(' / ')},
+    ];
+    tbox.innerHTML='';
+    tbox.appendChild(mkTable(cols, rows, sort.rankComp, setKey, null, null));
+
+    const n=el('div','note');
+    n.innerHTML='<b>「これとこれを合わせると理論上いちばん火力が出る」までしか言っていない。</b>'
+      + '理論火力はキャリー単体の BiS ダメージで、構成の他の7体・配置・相手は入っていない。'
+      + '<br><b>使用率が低い × 追い風が大きい × 派生が多い</b> が「まだ誰も使っていないが'
+      + '曲げが利く構成」の候補になる。ただし使用率が低い理由が「単に弱い」可能性は'
+      + 'このデータでは区別できない。'
+      + (((F.rows||[]).some(function(r){ return r.weights_unverified; }))
+          ? '<br><span class="wtxt"><b>総合の重みは未検証。</b>総合列より、追い風・派生・ゴールドの生の数字を見ること。</span>'
+          : '');
+    tbox.appendChild(n);
+  }
+  sortSel.onchange=function(){ setKey(sortSel.value); };
+  draw();
+}
+
+/* ================= 前衛（壁）の評価 =================
+   キャリーが撃てる時間は前衛が保つ時間で決まるので、
+   火力とは別の土俵で「誰が本当に壁として優秀か」を並べる。
+
+   ★ 出さない数字 ★
+   勝率も順位も出さない。回復とシールドはまだ計算に入っていないので、
+   それらを持つユニットは実際より低く出る。該当ユニットには印を付ける。 */
+function renderFrontline(m){
+  const F = T.frontline;
+  if(!F){ m.innerHTML='<div class="empty">前衛データがありません（build_app を実行）</div>'; return; }
+
+  const ctl=el('div','controls');
+  const dps=el('select');
+  (F.incoming_dps||[400,800,1400]).forEach(d=>dps.appendChild(new Option('被弾 '+d+' DPS で見る', d)));
+  dps.value=String((F.incoming_dps||[])[1] || 800);
+  const sortSel=el('select');
+  [['ehp_with_sustain','回復込みの実効耐久が高い順'],
+   ['ehp_worst','素の実効耐久が高い順'],
+   ['sustain_ratio','回復で伸びる倍率が大きい順'],
+   ['ehp_per_cost','コスト効率が高い順'],
+   ['gain','防具で伸びる量が大きい順'],['cut','軽減率が高い順'],
+   ['cost','コストが高い順']].forEach(x=>sortSel.appendChild(new Option(x[1],x[0])));
+  const costSel=el('select');
+  costSel.appendChild(new Option('全コスト',''));
+  [1,2,3,4,5].forEach(c=>costSel.appendChild(new Option('コスト'+c+'のみ',String(c))));
+  const susChk=el('label');
+  susChk.style.cssText='display:inline-flex;align-items:center;gap:5px;color:var(--dim)';
+  const cb=el('input'); cb.type='checkbox';
+  susChk.append(cb, document.createTextNode('回復・シールドが効いている体だけ'));
+  ctl.append(dps, sortSel, costSel, susChk);
+  m.appendChild(ctl);
+
+  const note=el('div','note');
+  const ngain=(F.rows||[]).filter(r=>(r.sustain_ratio||1)>1.01).length;
+  const nmiss=(F.rows||[]).filter(r=>r.casts===0 && r.first_cast_s).length;
+  note.innerHTML =
+    '<b>キャリーが撃てる時間は、前衛が保つ時間で決まる。</b>'
+    + 'ここは火力とは別の土俵で「誰が壁として優秀か」を並べている。'
+    + '対象は射程2以下で購入できる '+(F.rows||[]).length+' 体。'
+    + '<br><b>実効耐久</b>＝体力 ×(1 + 防御/100)。物理と魔法のうち'
+    + '<b>弱い方</b>を採る（先に溶ける方が実際に保つ時間を決めるので）。'
+    + '<br><b>回復とシールドを計算に入れてある。</b>'
+    + '<b>'+ngain+' 体</b>が素の実効耐久より上がった。'
+    + 'シールドは軽減後のダメージを吸うので1対1、回復は体力が戻るので'
+    + '防御の倍率が乗る ── この2つは効き方が違うので分けて計算している。'
+    + '<br>詠唱回数は<b>被弾によるマナ生成を含む</b>（被弾 '+(F.sustain_dps||800)+' DPS 想定）。'
+    + 'タンクは通常攻撃だけではマナが貯まらないので、これを入れないと'
+    + 'シールドも回復もゼロになってしまう。'
+    + (nmiss ? ('<br><b class="wtxt">'+nmiss+' 体は初回詠唱が戦闘時間に間に合っていない。</b>'
+               + '「初回詠唱」列を見ること。8.2秒のようなギリギリの体は、'
+               + '戦闘が少し延びるだけで効くようになる。') : '');
+  m.appendChild(note);
+
+  const fact=el('div','note');
+  fact.innerHTML='<b>Set18 で分かったこと</b>: 全74体で<b>物理防御＝魔法防御</b>だった。'
+    + 'つまり素の状態では物理・魔法の偏りは作れず、'
+    + '<b>偏りはアイテムでしか作れない</b>。相手が物理寄りか魔法寄りかを見て防具を変える、'
+    + 'という判断がそのまま効くということ。';
+  m.appendChild(fact);
+
+  const box=el('div'); m.appendChild(box);
+
+  function draw(){
+    const d = dps.value;
+    let rows = (F.rows||[]).slice();
+    if(costSel.value) rows = rows.filter(r=>String(r.cost)===costSel.value);
+    if(cb.checked) rows = rows.filter(r=>(r.sustain_ratio||1)>1.01);
+    const key = sortSel.value;
+    rows.sort(function(a,b){
+      if(key==='gain') return ((b.item_gain||{}).gain||0)-((a.item_gain||{}).gain||0);
+      if(key==='sustain_ratio') return (b.sustain_ratio||1)-(a.sustain_ratio||1);
+      if(key==='ehp_with_sustain')
+        return (b.ehp_with_sustain||b.ehp_worst)-(a.ehp_with_sustain||a.ehp_worst);
+      if(key==='cut') return b.cut_physical-a.cut_physical;
+      if(key==='cost') return b.cost-a.cost || b.ehp_worst-a.ehp_worst;
+      return (b[key]||0)-(a[key]||0);
+    });
+    box.innerHTML='';
+    const tbl=el('table'), th=el('thead'), tr=el('tr');
+    ['','ユニット','C','実効耐久','回復込み','倍率','体力','防御','軽減率',
+     '被弾'+d+'で耐える秒','初回詠唱','1コストあたり','防具3個で']
+      .forEach(function(x){ const e=el('th',null,x); e.style.cursor='default'; tr.appendChild(e); });
+    th.appendChild(tr); tbl.appendChild(th);
+    const tb=el('tbody');
+    const best = rows.length ? Math.max.apply(null, rows.map(r=>r.ehp_worst)) : 1;
+    rows.forEach(function(r){
+      const u = UNIT_MAP[r.apiName];
+      const row=el('tr');
+      const c0=el('td'); if(u) c0.appendChild(unitIcon(u,24)); row.appendChild(c0);
+      row.appendChild(el('td',null,r.name));
+      const cc=el('td'); cc.appendChild(costChip(r.cost)); row.appendChild(cc);
+      // 実効耐久は棒でも出す。数字だけだと差が掴みにくい
+      const ce=el('td','num');
+      const bar=el('span');
+      bar.style.cssText='display:inline-block;height:8px;border-radius:2px;background:var(--accent);'
+        +'width:'+Math.max(4, Math.round(r.ehp_worst/best*60))+'px;margin-right:6px;vertical-align:1px';
+      ce.appendChild(bar);
+      ce.appendChild(document.createTextNode(r.ehp_worst.toLocaleString()));
+      row.appendChild(ce);
+      // 回復・シールド込み
+      const cw=el('td','num',(r.ehp_with_sustain||r.ehp_worst).toLocaleString());
+      if((r.sustain_ratio||1)>1.01) cw.style.color='var(--ok)';
+      row.appendChild(cw);
+      const cr=el('td','num',(r.sustain_ratio&&r.sustain_ratio>1.01)
+                             ? (r.sustain_ratio+'倍') : '—');
+      if(r.sustain_sources && r.sustain_sources.length)
+        cr.title = r.sustain_sources.join(' / ');
+      row.appendChild(cr);
+      row.appendChild(el('td','num',r.hp.toLocaleString()));
+      row.appendChild(el('td','num',String(r.armor)));
+      row.appendChild(el('td','num',Math.round(r.cut_physical*100)+'%'));
+      const secs = (r.seconds_with_sustain||r.seconds||{})[d];
+      row.appendChild(el('td','num',String(secs ?? '—')+' 秒'));
+      // 初回詠唱。間に合っていない体は赤く出す
+      const cfc=el('td','num', r.first_cast_s ? (r.first_cast_s+' 秒') : '—');
+      if(r.casts===0 && r.first_cast_s){
+        cfc.style.color='var(--bad)';
+        cfc.title='戦闘時間に間に合っていない。シールドも回復も発動しない扱い';
+      }
+      row.appendChild(cfc);
+      row.appendChild(el('td','num',r.ehp_per_cost.toLocaleString()));
+      const g=r.item_gain;
+      const cg=el('td','num', g ? ('+'+g.gain.toLocaleString()+'（'+g.ratio+'倍）') : '—');
+      row.appendChild(cg);
+      tb.appendChild(row);
+    });
+    tbl.appendChild(tb);
+    const w=el('div','tablewrap'); w.appendChild(tbl); box.appendChild(w);
+
+    const foot=el('div','note');
+    foot.innerHTML='<b>防具3個で</b>の列は '+(F.armor_set||[]).join(' + ')
+      +' を持たせたときの実効耐久の増分。'
+      +'<b>倍率と実数で向きが逆になる</b> ── 倍率は素の防御が低いユニットほど大きく、'
+      +'実数は体力が多いユニットほど大きい。'
+      +'「誰が残るか」を決めるのは実効耐久の絶対値なので、判断に使うのは<b>増分の方</b>。'
+      +'<br><b>回復・シールドで入れていない前提</b>: '
+      +'シールドは詠唱のたびに出るものとして詠唱回数を掛けている（重ならない仕様なら過大）。'
+      +'「体力が一定以下で発動」は1戦闘に1回として扱う。'
+      +'オムニヴァンプは素の与ダメージに掛けている（長く生きるほど増えるので過小）。'
+      +'<br>被弾DPS は相手の火力そのものなので本来は相手依存。'
+      +'ここでは「誰が長く保つか」を比べるための基準値として置いている。';
+    box.appendChild(foot);
+  }
+  dps.onchange=sortSel.onchange=costSel.onchange=cb.onchange=draw;
+  draw();
+}
+
+function renderConstants(m){
+  m.appendChild(el('div','note',
+    'このツールの計算が依存しているゲーム定数。配信データに入っていないので、'+
+    '検証状態を明示している。未検証の定数に依存した数字は、ユニット同士の相対比較には使えるが絶対値は保証されない。'));
+  m.appendChild(mkTable([
+    {key:'verified',label:'状態',render:c=>{
+      const b=el('span','badge '+(c.verified?'ok':'warn'), c.verified?'検証済':'未検証'); return b;}},
+    {key:'name',label:'定数'},
+    {key:'value',label:'値',render:c=>String(c.value)},
+    {key:'unit',label:'単位'},
+    {key:'note',label:'なぜ効くか / 出典',wrap:true,render:c=>c.note||c.source},
+  ], T.constants.slice().sort((a,b)=>a.verified-b.verified||a.name.localeCompare(b.name)),
+    {key:'name',dir:1}, ()=>{}));
+}
+
+/* ================= 構成ソルバー =================
+   指定したキャリーを必ず含み、盤面サイズ以内で、発動するトレイトの価値の合計を
+   最大にするユニットの組み合わせをビーム探索＋局所改善で求める。
+   src/engine/comps.py と同じアルゴリズム。ロジックを変えるときは両方直すこと。
+
+   これが出すのは「トレイトの噛み合いが最良の並び」であって「最強の構成」ではない。
+   アイテム・配置・引きやすさ・実戦の勝率は入っていない。 */
+const STYLE_VALUE = {1:1.0, 3:2.5, 4:2.0, 5:5.0, 6:8.0};
+const COST_PENALTY = 0.06;
+// キャリーのトレイトが1つも発動していない解への減点。これが無いと
+// 「トレイト合計は強いがキャリーが浮いている」盤面が1位になる。
+const NO_CARRY_TRAIT_PENALTY = 6.0;
+const baseName = n => (n||'').replace(/\s*\(.*\)$/,'').trim();
+
+const TRAIT_MAP = {};
+T.traits.forEach(t=>{ if(t.tiers.length && t.tiers[0].minUnits) TRAIT_MAP[t.name]=t; });
+// 「1体置けば必ず点灯する」トレイトはスコアから外す（発動表示には残す）。
+// 保持者の人数は関係ない。Avatar は Lux 10形態が持つが、どれか1体で点灯するので
+// 構成の良し悪しを表さない。src/engine/comps.py の is_free_trait と同じ条件。
+const FREE_TRAITS = new Set(T.traits
+  .filter(t => (t.breakpoints||[]).length===1 && t.breakpoints[0]===1)
+  .map(t => t.name));
+const UNIT_MAP = {};
+T.units.forEach(u=>UNIT_MAP[u.apiName]=u);
+
+function activated(apis){
+  const counts={};
+  apis.forEach(a=>UNIT_MAP[a].traits.forEach(t=>counts[t]=(counts[t]||0)+1));
+  const out=[];
+  for(const name of Object.keys(counts)){
+    const n=counts[name], t=TRAIT_MAP[name];
+    if(!t) continue;
+    let best=null;
+    t.tiers.forEach(tier=>{ if(tier.minUnits!=null && n>=tier.minUnits) best=tier; });
+    if(best) out.push({name:name, count:n, minUnits:best.minUnits, style:best.style, variables:best.variables});
+    else out.push({name:name, count:n, minUnits:null, style:0, needs:(t.breakpoints[0]||0)-n});
+  }
+  out.sort((a,b)=>(b.style-a.style)||(b.count-a.count)||a.name.localeCompare(b.name));
+  return out;
+}
+
+function scoreOf(apis, carryTraits, carryWeight){
+  let total=0, carryHit=0;
+  activated(apis).forEach(a=>{
+    if(!a.style) return;
+    if(FREE_TRAITS.has(a.name)) return;   // 選択の余地が無い
+    let v=STYLE_VALUE[a.style]||1;
+    if(carryTraits.has(a.name)){ v*=carryWeight; carryHit++; }
+    total+=v;
+  });
+  apis.forEach(a=>{ total-=COST_PENALTY*UNIT_MAP[a].cost; });
+  if(!carryHit) total-=NO_CARRY_TRAIT_PENALTY;
+  return total;
+}
+
+function solve(carryApi, size, opts){
+  opts=opts||{};
+  const beam=opts.beam||240, top=opts.top||3, carryWeight=opts.carryWeight||2.0;
+  const banned=new Set(opts.exclude||[]);
+  const must=new Set(opts.must||[]);
+  const carry=UNIT_MAP[carryApi];
+  const carryTraits=new Set(carry.traits);
+  const pool=T.units.filter(u=>!banned.has(u.apiName));
+  function conflicts(apis,cand){
+    const bn=baseName(cand.name);
+    for(let i=0;i<apis.length;i++) if(baseName(UNIT_MAP[apis[i]].name)===bn) return true;
+    return false;
+  }
+  let seed=[carryApi];
+  must.forEach(x=>{ if(seed.indexOf(x)<0) seed.push(x); });
+  if(seed.length>size) return [];
+  let states=[seed.slice().sort()];
+  while(states[0].length<size){
+    const nxt=new Map();
+    for(const st of states){
+      for(const cand of pool){
+        if(st.indexOf(cand.apiName)>=0||conflicts(st,cand)) continue;
+        const ns=st.concat([cand.apiName]).sort();
+        const key=ns.join('|');
+        if(!nxt.has(key)) nxt.set(key,{arr:ns,s:scoreOf(ns,carryTraits,carryWeight)});
+      }
+    }
+    if(!nxt.size) break;
+    states=Array.from(nxt.values()).sort((a,b)=>b.s-a.s).slice(0,beam).map(x=>x.arr);
+  }
+  const results=[];
+  for(const st of states.slice(0, top*4)){
+    let cur=st.slice(), curS=scoreOf(cur,carryTraits,carryWeight), improved=true, rounds=0;
+    while(improved && rounds<12){
+      improved=false; rounds++;
+      for(const outA of cur.slice()){
+        if(outA===carryApi||must.has(outA)) continue;
+        const rest=cur.filter(x=>x!==outA);
+        let done=false;
+        for(const cand of pool){
+          if(rest.indexOf(cand.apiName)>=0||conflicts(rest,cand)) continue;
+          const ns=rest.concat([cand.apiName]).sort();
+          const s=scoreOf(ns,carryTraits,carryWeight);
+          if(s>curS+1e-9){ cur=ns; curS=s; improved=true; done=true; break; }
+        }
+        if(done) break;
+      }
+    }
+    results.push({s:curS, arr:cur});
+  }
+  const seen=new Set(), best=[];
+  results.sort((a,b)=>b.s-a.s);
+  for(const r of results){
+    const key=r.arr.join('|');
+    if(seen.has(key)) continue;
+    seen.add(key);
+    const acts=activated(r.arr);
+    best.push({
+      score:Math.round(r.s*100)/100,
+      units:r.arr.map(a=>UNIT_MAP[a]).sort((x,y)=>y.cost-x.cost||x.name.localeCompare(y.name)),
+      totalCost:r.arr.reduce((s,a)=>s+UNIT_MAP[a].cost,0),
+      active:acts.filter(a=>a.style),
+      dead:acts.filter(a=>!a.style && a.needs>0 && a.needs<=2),
+      carryApi:carryApi
+    });
+    if(best.length>=top) break;
+  }
+  return best;
+}
+
+/* ================= アイテム推奨（JS 側の再実装は撤去した） =================
+   ここには完成品3個の総当り（39C3 = 9139通り）を JS で評価し直す一式
+   （ITEM_STAT / statsWith / abilityFit / recommendItems）が置いてあった。
+   使っていたのは「実測メタ」カードの理論値順位だけで、そこが Python 側の
+   unit.bis（Fight で積分した合計ダメージ順）を読むようになったので呼び手が消えた。
+   ★ 同じ画面に理論値のモデルを2つ置かないこと ★ それが食い違うと、
+   どちらが正本か画面からは判別できなくなる。アイテムの順位は unit.bis だけを使う。 */
+
+function bisNeverCast(unit){
+  return !!(unit.bis && unit.bis.length && unit.bis[0].never_cast);
+}
+
+function itemCard(unit){
+  const c = el('div','card');
+  c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
+  const sc = (unit.ability && unit.ability.scaling) || {kind:'?', scales:[]};
+  c.appendChild(el('h2',null,'理想アイテム — '+unit.name));
+
+  const dur = (T.meta && T.meta.fight_duration) || 8;
+  const manaPer = unit.role && /Caster$/.test(unit.role) ? '7'
+                : unit.role && /Tank$/.test(unit.role) ? '5' : '10';
+  const sub = el('div','note');
+  sub.innerHTML =
+    '<b>'+dur+'秒の戦闘で出る合計ダメージ</b>で順位付けしている。'
+    + '瞬間DPSでは積み上げ系（Guinsoo / Archangel&#39;s / Kraken&#39;s / Titan&#39;s）を'
+    + '表現できないため。戦闘時間は実測メタとの一致が最大になる点を探して決めた'
+    + '（6秒19% / <b>8秒27%</b> / 12秒20% / 30秒17%）。<br>'
+    + 'スキル: <b>'+(sc.kind||'不明')+'型</b>'
+    + (sc.scales&&sc.scales.length ? '（参照: '+sc.scales.join(' / ')+'）' : '')
+    + '　ロール <b>'+(unit.role||'不明')+'</b>（通常攻撃1回のマナ '+manaPer+'）';
+  c.appendChild(sub);
+
+  if(bisNeverCast(unit)){
+    const w = el('div','note');
+    w.style.cssText='background:#3a3018;border-radius:6px;padding:8px;color:#f0d29a';
+    w.innerHTML='<b>注意: この想定だと一度も詠唱しない。</b>'
+      +'マナが重く、'+dur+'秒では溜まりきらないため。'
+      +'実戦では<b>被弾でもマナが溜まる</b>が、それは相手依存なのでモデルに入っていない。'
+      +'このユニットの順位は通常攻撃だけで付いている。';
+    c.appendChild(w);
+  }
+
+  if(unit.ability && unit.ability.multi_hit){
+    const w = el('div','note');
+    w.style.cssText='background:#3a3018;border-radius:6px;padding:8px;color:#f0d29a';
+    w.innerHTML='<b>注意: このユニットは1回の詠唱で複数回当たる。</b>'
+      +'配信データの数値は「1発あたり」で、発数は取得できていない'
+      +'（Riot の説明文で @Num…@ のまま）。したがって'
+      +'<b>スキルダメージは下限値</b>で、下の順位は通常攻撃に偏っている。'
+      +'このユニットのアイテム推奨は当てにしないこと。';
+    c.appendChild(w);
+  }
+
+  const bis = unit.bis || [];
+  if(!bis.length){
+    c.appendChild(el('div','note','アイテム推奨が生成されていない。'
+      +' python -m src.build_app を実行すること。'));
+    return c;
+  }
+
+  const tbl=el('table'), th=el('thead'), tr=el('tr');
+  ['#','アイテム3個','合計ダメージ','実測の平均順位','通常','スキル','継続','攻撃/詠唱','HP','AD','AP','攻撃速度','クリ率']
+    .forEach(x=>{const e=el('th',null,x); e.style.cursor='default'; tr.appendChild(e);});
+  th.appendChild(tr); tbl.appendChild(th);
+  const tb=el('tbody');
+  bis.forEach(function(b,i){
+    const row=el('tr');
+    row.appendChild(el('td','num',String(i+1)));
+    const c2=el('td','wrap');
+    b.items.forEach(function(n){ c2.appendChild(el('span','tag',n)); });
+    row.appendChild(c2);
+    const tot=el('td','num',b.total.toLocaleString());
+    if(i===0) tot.style.color='var(--ok)';
+    row.appendChild(tot);
+    const mp=el('td','num', b.measured_place ? b.measured_place+'位' : '—');
+    if(b.measured_place){
+      mp.title = 'op.gg の実測 '+(b.measured_n||0).toLocaleString()+' 試合 / Top4率 '
+        + Math.round((b.measured_top4||0)*100)+'%';
+      if(b.measured_place < 4.0) mp.style.color='var(--ok)';
+      else if(b.measured_place > 4.4) mp.style.color='var(--bad)';
+    } else { mp.style.color='var(--dim)'; mp.title='実測で十分な試合数が無い組み合わせ'; }
+    row.appendChild(mp);
+    row.appendChild(el('td','num',b.auto.toLocaleString()));
+    row.appendChild(el('td','num',b.ability.toLocaleString()));
+    row.appendChild(el('td','num',b.burn?b.burn.toLocaleString():'—'));
+    row.appendChild(el('td','num',b.attacks+'/'+b.casts));
+    row.appendChild(el('td','num',fmt(b.hp)));
+    row.appendChild(el('td','num',fmt(b.ad)));
+    row.appendChild(el('td','num',fmt(b.ap)));
+    row.appendChild(el('td','num',fmt(b.as)));
+    row.appendChild(el('td','num',Math.round(b.crit*100)+'%'));
+    tb.appendChild(row);
+  });
+  tbl.appendChild(tb);
+  const w=el('div','tablewrap'); w.appendChild(tbl); c.appendChild(w);
+
+  const un = (bis[0] && bis[0].unmodeled) || [];
+  const notes = [
+    '「実測の平均順位」は op.gg の集計値（理論値とは別の根拠）。'
+      + '数字が小さいほど良い。— は実測で十分な試合数が無い組み合わせ。'
+      + '理論1位に実測の裏付けがあるかを、その場で確かめられるようにしてある。',
+    '相手は物理防御50 / 魔法防御50 / HP2000 と仮定。Sunder・Shred は相手の防御を削る形で入っている。',
+    'モデル化した積み上げ: 攻撃速度/秒（Guinsoo・Quicksilver）、AP/間隔（Archangel の杖）、'
+      + 'AD/攻撃（Kraken・Titan）、クリでの増幅（Striker）、継続ダメージ（Red Buff 等）。',
+  ];
+  if(un.length) notes.push('未モデル: '+un.join(' / '));
+  notes.push('相手の行動・CC・配置・味方のバフは入っていない。単騎で殴り続けた場合の合計。');
+  notes.forEach(function(t){ c.appendChild(el('div','note',t)); });
+  return c;
+}
+
+/* ================= リロール確率 =================
+   src/engine/econ.py と同じ Markov 連鎖。**式を変えるときは必ず両方直すこと。**
+   引くたびにプールからその駒が減るので、1スロットの命中率が下がる。
+   二項分布で出すと過大評価になるため、保有枚数と残りゴールドを状態にして解く。
+
+   定数（ショップ確率表・プール枚数）は Riot のマップデータから機械的に取ったもの。
+   一方「他プレイヤーの保有枚数」と「コスト帯の枯れ具合」は推測でしか入らない。
+   この2つが結果を大きく動かすので、UI で必ず触れるようにしてある。 */
+const SLOTS_PER_SHOP = 5, REROLL_COST = 2;
+
+/* ★ ここは Python 側だけ直して、JS が旧アルゴリズムのまま残っていた ★
+   「src/engine/econ.py と同じ Markov 連鎖」と書いてあるのに、
+   Python が購入代金を引くようになった後も JS は引いていなかった。
+   同じ入力で Lv10/5コスト 72.3%（JS）と 46.8%（Py）── 25.6pt も違う。
+   コメントが嘘になっている状態が一番危ないので、式ごと移植した。
+
+   状態は (保有枚数, 残りゴールド) の2次元。
+   ショップ1回＝2g 払って5スロット。駒を買うたびに Nコスト分が減る。 */
+function rolldown(econ, level, tier, gold, owned, contested, drain){
+  const p = econ.pool[String(tier)];
+  if(!p) return null;
+  const row = econ.shop_odds[String(level)];
+  if(!row) return null;
+  const pTier = row[tier-1]/100;
+  const copiesTotal = p.per_unit, tierTotal = p.total;
+  const tierLeft0 = Math.max(1, tierTotal*(1-drain) - contested);
+  const unitCost = tier;            // Nコストの駒は Ng
+  const TARGET = 9;                 // 3★で打ち止め
+  const key = (k,g) => k + ':' + g;
+
+  let state = {}; state[key(owned, Math.floor(gold))] = 1;
+  const shops = Math.floor(gold / REROLL_COST);
+  for(let s=0; s<shops; s++){
+    const nxt = {};
+    for(const kk0 of Object.keys(state)){
+      const prob = state[kk0];
+      if(prob<=0) continue;
+      const parts = kk0.split(':');
+      const k = +parts[0], g = +parts[1];
+      // 目標に届いた／リロール代が払えないならここで止まる
+      if(k>=TARGET || g<REROLL_COST){
+        nxt[kk0] = (nxt[kk0]||0) + prob;
+        continue;
+      }
+      let shop = {}; shop[key(k, g-REROLL_COST)] = prob;
+      for(let slot=0; slot<SLOTS_PER_SHOP; slot++){
+        const s2 = {};
+        for(const sk of Object.keys(shop)){
+          const pr = shop[sk];
+          const sp = sk.split(':');
+          const kkk = +sp[0], gg = +sp[1];
+          if(kkk>=TARGET){ s2[sk]=(s2[sk]||0)+pr; continue; }
+          const gained = kkk - owned;
+          const copiesLeft = copiesTotal - contested - kkk;
+          const tierLeft = Math.max(1, tierLeft0 - gained);
+          let q = (tierLeft<=0||copiesLeft<=0) ? 0 : pTier*(copiesLeft/tierLeft);
+          q = Math.min(Math.max(q,0),1);
+          if(gg < unitCost){
+            // 枠に出ても買えない。保有枚数は増えない
+            s2[sk]=(s2[sk]||0)+pr;
+            continue;
+          }
+          const hit = key(kkk+1, gg-unitCost);
+          s2[hit] = (s2[hit]||0) + pr*q;
+          s2[sk]  = (s2[sk]||0)  + pr*(1-q);
+        }
+        shop = s2;
+      }
+      for(const sk of Object.keys(shop)) nxt[sk] = (nxt[sk]||0) + shop[sk];
+    }
+    state = nxt;
+  }
+
+  const dist = {};
+  Object.keys(state).forEach(function(sk){
+    const k = +sk.split(':')[0];
+    dist[k] = (dist[k]||0) + state[sk];
+  });
+  let exp=0, ge1=0, ge3=0, ge9=0;
+  Object.keys(dist).forEach(function(kk){
+    const k=+kk, v=dist[kk];
+    exp+=k*v; if(k>=1)ge1+=v; if(k>=3)ge3+=v; if(k>=9)ge9+=v;
+  });
+  return {exp:exp, p1:ge1, p2star:ge3, p3star:ge9, dist:dist};
+}
+
+function renderEcon(m){
+  const econ = T.econ;
+  if(!econ){
+    m.innerHTML = '<div class="empty">経済データが未生成です。'+
+      '<code>python src/econ_extract.py</code> を実行してください。</div>';
+    return;
+  }
+  const ctl = el('div','controls');
+  const unitSel = el('select');
+  unitSel.appendChild(new Option('ユニットを選ぶ（コスト帯だけでも可）',''));
+  T.units.slice().filter(u=>u.purchasable!==false)
+    .sort((a,b)=>b.cost-a.cost||a.name.localeCompare(b.name))
+    .forEach(u=>unitSel.appendChild(new Option(u.name+' (c'+u.cost+')', u.apiName)));
+  const costSel = el('select');
+  [1,2,3,4,5].forEach(c=>costSel.appendChild(new Option(c+' コスト', c)));
+  costSel.value = 4;
+  const goldIn = el('input'); goldIn.type='number'; goldIn.value=50; goldIn.min=0; goldIn.step=2;
+  goldIn.style.cssText='width:80px;background:var(--panel2);color:var(--fg);border:1px solid var(--line);padding:6px 9px;border-radius:5px';
+  const ownedIn = el('input'); ownedIn.type='number'; ownedIn.value=0; ownedIn.min=0; ownedIn.max=8;
+  ownedIn.style.cssText=goldIn.style.cssText;
+  const contIn = el('input'); contIn.type='number'; contIn.value=0; contIn.min=0; contIn.max=9;
+  contIn.style.cssText=goldIn.style.cssText;
+  const drainSel = el('select');
+  [['0','枯れ 0%（序盤・誰も取っていない）'],['0.25','枯れ 25%（中盤の目安）'],
+   ['0.4','枯れ 40%（終盤）'],['0.55','枯れ 55%（激戦）']].forEach(([v,l])=>
+    drainSel.appendChild(new Option(l,v)));
+  drainSel.value='0';
+  ctl.append(unitSel, costSel,
+    lbl('ゴールド', goldIn), lbl('保有', ownedIn), lbl('他者保有', contIn), drainSel);
+  m.appendChild(ctl);
+
+  function lbl(text, node){
+    const w=el('span'); w.style.cssText='display:inline-flex;align-items:center;gap:5px';
+    w.appendChild(el('span','dim',text)); w.appendChild(node); return w;
+  }
+
+  const note = el('div','note');
+  note.innerHTML = 'ショップ確率表とプール枚数は <b>Riot のマップデータから取った実値</b>。'+
+    '一方「他プレイヤーの保有枚数」と「コスト帯の枯れ具合」は推測しか入らず、'+
+    '<b>この2つが結果を大きく動かす</b>。枯れを 0% から 50% に変えると、'+
+    'Lv8・50g の 4コスト2★到達率は 43.5% から 86.8% まで動く。';
+  m.appendChild(note);
+
+  const box = el('div'); m.appendChild(box);
+
+  function run(){
+    const api = unitSel.value;
+    let tier = parseInt(costSel.value,10);
+    let unitName = null;
+    if(api){ const u=UNIT_MAP[api]; tier=u.cost; costSel.value=String(tier); unitName=u.name; }
+    // ★ `|| 50` は 0 を falsy として弾いていた ★
+    // リロールはリアルタイムに使うタブなので、所持金 0 と入れるのは
+    // 「今リロールできるか」を見たい普通の操作。それに 50g の答えを
+    // 返していた。空欄（既定値を使う）と 0（本当に金が無い）は
+    // 意味が違うので分ける。`||` ではなく isFinite で判定する。
+    const goldRaw = String(goldIn.value).trim();
+    const goldNum = parseInt(goldRaw, 10);
+    const goldBlank = (goldRaw === '' || !Number.isFinite(goldNum));
+    const gold = goldBlank ? 50 : Math.max(0, goldNum);
+    const owned=Math.max(0,parseInt(ownedIn.value,10)||0);
+    const cont=Math.max(0,parseInt(contIn.value,10)||0);
+    const drain=parseFloat(drainSel.value);
+    const p = econ.pool[String(tier)];
+
+    box.innerHTML='';
+    const c=el('div','card'); c.style.position='static'; c.style.maxHeight='none';
+    c.appendChild(el('h2',null,(unitName?unitName+' を':tier+'コストを')+' '+gold+'g で狙う'));
+    // リロールは2g。それ未満なら回数0なので、確率表を出す意味がない。
+    // 黙って2gに切り上げると「0gでも引ける」ように見えてしまう。
+    if(gold < 2){
+      const w=el('div','note');
+      w.innerHTML = '<b class="wtxt">'+gold+'g ではリロールできない。</b>'
+        + 'リロールは1回2g。所持金が2g未満のときに引ける枚数は0枚で、'
+        + '出現率の表を出しても答えにならない。'
+        + '<br>知りたいのが「次のターンまでに何g貯まるか」なら経済タブを見ること。';
+      c.appendChild(w);
+      box.appendChild(c);
+      return;
+    }
+    if(goldBlank){
+      const w=el('div','note');
+      w.innerHTML='ゴールド欄が空なので既定の <b>50g</b> で計算している。';
+      c.appendChild(w);
+    }
+    c.appendChild(el('div','note',
+      tier+'コストのプール: '+p.per_unit+'枚 × '+p.unit_count+'種 = '+p.total+'枚　/　'+
+      gold+'g = '+Math.floor(gold/2)*5+' スロット（2gで5枠）　/　'+
+      '前提: 保有'+owned+'枚・他者'+cont+'枚・枯れ'+Math.round(drain*100)+'%'));
+
+    const tbl=el('table'), th=el('thead'), htr=el('tr');
+    ['Lv','このコストの出現率','期待枚数','1枚以上','2★到達(3枚)','3★到達(9枚)']
+      .forEach(x=>{const e=el('th',null,x); e.style.cursor='default'; htr.appendChild(e);});
+    th.appendChild(htr); tbl.appendChild(th);
+    const tb=el('tbody');
+    let best=null;
+    Object.keys(econ.shop_odds).map(Number).sort((a,b)=>a-b).forEach(lv=>{
+      const row=econ.shop_odds[String(lv)];
+      if(!row || !row[tier-1]) return;
+      const r=rolldown(econ, lv, tier, gold, owned, cont, drain);
+      if(!r) return;
+      if(!best || r.p2star>best.p2star) best={lv:lv, p2star:r.p2star};
+      const tr=el('tr');
+      tr.appendChild(el('td','num',String(lv)));
+      tr.appendChild(el('td','num',row[tier-1]+'%'));
+      tr.appendChild(el('td','num',(Math.round(r.exp*100)/100).toFixed(2)));
+      tr.appendChild(el('td','num',(r.p1*100).toFixed(1)+'%'));
+      const c5=el('td','num',(r.p2star*100).toFixed(1)+'%');
+      if(r.p2star>=0.5) c5.style.color='var(--ok)';
+      else if(r.p2star<0.15) c5.style.color='var(--bad)';
+      tr.appendChild(c5);
+      tr.appendChild(el('td','num',(r.p3star*100).toFixed(1)+'%'));
+      tb.appendChild(tr);
+    });
+    tbl.appendChild(tb);
+    const w=el('div','tablewrap'); w.appendChild(tbl); c.appendChild(w);
+
+    // XP と収入
+    const x=el('div'); x.style.marginTop='12px';
+    x.appendChild(el('b',null,'レベルアップに必要なXP（購入は4gで4XP）'));
+    const xt=el('table'), xtb=el('tbody'), xth=el('thead'), xhtr=el('tr');
+    ['→Lv','必要XP','購入だけで上げる場合のゴールド'].forEach(v=>{
+      const e=el('th',null,v); e.style.cursor='default'; xhtr.appendChild(e);});
+    xth.appendChild(xhtr); xt.appendChild(xth);
+    Object.keys(econ.xp.to_next_level).map(Number).sort((a,b)=>a-b).forEach(lv=>{
+      const need=econ.xp.to_next_level[String(lv)];
+      const tr=el('tr');
+      tr.appendChild(el('td','num',String(lv+1)));
+      tr.appendChild(el('td','num',String(need)));
+      tr.appendChild(el('td','num',String(Math.ceil(need/4)*4)));
+      xtb.appendChild(tr);
+    });
+    xt.appendChild(xtb);
+    const xw=el('div','tablewrap'); xw.appendChild(xt); x.appendChild(xw);
+    x.appendChild(el('div','note','XP表はゲームデータに無くサーバ側定数。公式パッチノートが唯一の一次ソース。'));
+    c.appendChild(x);
+
+    // 連勝ボーナス
+    if(econ.streaks){
+      const sb=el('div'); sb.style.marginTop='12px';
+      sb.appendChild(el('b',null,'連勝／連敗ボーナス'));
+      Object.keys(econ.streaks).forEach(k=>{
+        const label=(k==='mWinstreaks'?'連勝':k==='mLossStreaks'?'連敗':k);
+        const parts=econ.streaks[k].map(t=>{
+          const rng = t.max==null ? (t.min+'連以上')
+            : (t.min===t.max ? t.min+'連' : t.min+'〜'+t.max+'連');
+          return rng+' = +'+t.gold+'g';
+        });
+        sb.appendChild(el('div','note',label+'： '+parts.join(' / ')));
+      });
+      c.appendChild(sb);
+    }
+    box.appendChild(c);
+  }
+  unitSel.onchange=costSel.onchange=drainSel.onchange=run;
+  goldIn.oninput=ownedIn.oninput=contIn.oninput=run;
+  run();
+}
+
+/* ================= 配置 =================
+   src/engine/board.py と同じ幾何。戦闘シミュレータではない。
+   出すのは「誰が誰を初期ターゲットにするか」「何秒で届くか」「AoEに何体入るか」だけ。
+   勝敗もダメージ量も出さない（docs/03 §7）。
+
+   ★ 規約について ★
+   Riot の開発者ポリシーは Scouting（対戦中に相手盤面を読むこと）と
+   リアルタイム助言を禁止している。相手構成は**こちらで手入力する**形にしてあり、
+   ゲームから自動で読むことはしない（docs/03 §5）。 */
+const B_ROWS = 8, B_COLS = 7;
+const OWN_ROWS = [4,5,6,7];
+// 移動の秒/ヘクスは Python 側の定数（Riot の換算表由来）を使う。
+// ここに 0.5 を直書きしていたため、「定数」タブの 0.25 と食い違っていた。
+const SECONDS_PER_HEX = (function(){
+  try { return T.constants.filter(function(c){return c.name==='HEX_MOVE_SECONDS';})[0].value; }
+  catch(e){ return 0.48; }
+})();
+
+/* ---------- ユニットのアイコン ----------
+   画像は app/img/ にあるが **git には入れていない**（Riot の資産なので再配布しない）。
+   取得は python src/fetch_images.py。
+   **画像が1枚も無くても画面は成立する**ようにしてある:
+   読み込みに失敗したら、そのユニットの頭文字＋コスト色の丸に差し替える。 */
+const COST_COLOR = {1:'#8b98a8', 2:'#7bc86c', 3:'#6ea8fe', 4:'#c792ea', 5:'#e0a33e'};
+
+function unitIcon(unit, px){
+  px = px || 28;
+  const wrap = el('span');
+  wrap.style.cssText = 'display:inline-block;width:'+px+'px;height:'+px+'px;'
+    + 'border-radius:4px;overflow:hidden;vertical-align:middle;flex:0 0 auto;'
+    + 'border:1px solid '+(COST_COLOR[unit.cost]||'var(--line)')+';background:var(--panel2)';
+  wrap.title = unit.name;
+  const fallback = () => {
+    wrap.textContent = (unit.name||'?').slice(0,1);
+    wrap.style.display = 'inline-flex';
+    wrap.style.alignItems = 'center';
+    wrap.style.justifyContent = 'center';
+    wrap.style.fontSize = Math.round(px*0.5)+'px';
+    wrap.style.color = COST_COLOR[unit.cost] || 'var(--fg)';
+  };
+  if(!unit.img){ fallback(); return wrap; }
+  const im = el('img');
+  im.src = unit.img; im.alt = unit.name; im.loading = 'lazy';
+  im.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
+  im.onerror = () => { wrap.innerHTML=''; fallback(); };
+  wrap.appendChild(im);
+  return wrap;
+}
+
+function toCube(c, r){ const x = c - ((r - (r & 1)) / 2); return [x, -x - r, r]; }
+function hexDist(a, b){
+  const A = toCube(a[0], a[1]), C = toCube(b[0], b[1]);
+  return Math.max(Math.abs(A[0]-C[0]), Math.abs(A[1]-C[1]), Math.abs(A[2]-C[2]));
+}
+function mirrorHex(h){ return [B_COLS - 1 - h[0], B_ROWS - 1 - h[1]]; }
+const hexKey = h => h[0] + ',' + h[1];
+
+function initialTargets(units){
+  const out = {};
+  units.forEach((u, i) => {
+    const foes = units.filter(v => v.side !== u.side);
+    if(!foes.length){ out[i] = []; return; }
+    let best = Infinity, cands = [];
+    foes.forEach(v => {
+      const d = hexDist(u.hex, v.hex);
+      if(d < best - 1e-9){ best = d; cands = [v]; }
+      else if(Math.abs(d - best) < 1e-9){ cands.push(v); }
+    });
+    out[i] = cands.map(v => units.indexOf(v));
+  });
+  return out;
+}
+
+function threatOn(units, idx){
+  const tg = initialTargets(units), me = units[idx], threats = [];
+  units.forEach((u, i) => {
+    if(u.side === me.side) return;
+    const c = tg[i];
+    if(c.indexOf(idx) < 0) return;
+    const d = hexDist(u.hex, me.hex);
+    const gap = Math.max(0, d - (u.range || 1));
+    threats.push({by:u.name, probability:1/c.length, distance:d, range:u.range,
+                  inRange:gap<=0, seconds:+(gap*SECONDS_PER_HEX).toFixed(2)});
+  });
+  threats.sort((a,b)=>a.seconds-b.seconds || b.probability-a.probability);
+  return {expected: threats.reduce((s,t)=>s+t.probability,0),
+          immediate: threats.filter(t=>t.inRange).length, threats:threats};
+}
+
+function carrySafety(units, carryIdx){
+  const carry = units[carryIdx];
+  const others = units.filter((u,i)=>i!==carryIdx);
+  const occupied = new Set(others.map(u=>hexKey(u.hex)));
+  const foes = others.filter(u=>u.side!==carry.side);
+  const out = [];
+  OWN_ROWS.forEach(r=>{
+    for(let c=0;c<B_COLS;c++){
+      const h=[c,r];
+      if(occupied.has(hexKey(h))) continue;
+      const trial = others.concat([Object.assign({}, carry, {hex:h})]);
+      const t = threatOn(trial, trial.length-1);
+      const reach = foes.map(f=>Math.max(0, hexDist(h,f.hex)-(f.range||1))*SECONDS_PER_HEX)
+                        .sort((a,b)=>a-b);
+      // 初期ターゲットだけ見ると、前衛の裏が全部同点になる。
+      // 「前衛が溶けたあと何秒で届くか」を二次指標として必ず足す。
+      const pressure = reach.slice(0,3).reduce((s,x)=>s+1/(1+x),0);
+      out.push({hex:h, danger:+(t.expected + 1.5*t.immediate + 0.5*pressure).toFixed(2),
+                expected:+t.expected.toFixed(2), immediate:t.immediate,
+                soonest: reach.length ? +reach[0].toFixed(2) : null, threats:t.threats});
+    }
+  });
+  return out;
+}
+
+function defaultFormation(compUnits, carryApi){
+  const rowFor = rng => rng<=1 ? 4 : rng<=2 ? 5 : rng<=4 ? 6 : 7;
+  const order = [3,2,4,1,5,0,6];
+  const used = new Set(['0,7']);
+  const placed = [];
+  const pool = compUnits.filter(u=>u.apiName!==carryApi)
+    .slice().sort((a,b)=>(a.base.range||1)-(b.base.range||1));
+  pool.forEach(u=>{
+    const rng = u.base.range || 1;
+    const want = rowFor(rng);
+    const rows = [want].concat([4,5,6,7].filter(x=>x!==want));
+    let spot=null;
+    for(const r of rows){ for(const c of order){ if(!used.has(c+','+r)){ spot=[c,r]; break; } } if(spot) break; }
+    if(spot){ used.add(hexKey(spot)); placed.push({name:u.name, apiName:u.apiName,
+      range:rng, cost:u.cost, side:'own', hex:spot}); }
+  });
+  const carry = compUnits.find(u=>u.apiName===carryApi);
+  placed.push({name:carry.name, apiName:carry.apiName, range:carry.base.range||1,
+               cost:carry.cost, side:'own', hex:[0,7], isCarry:true});
+  return placed;
+}
+
+
+/* ---------- 相手盤面に対する初期配置 ----------
+   src/engine/board.py の evaluate / place_against と同じ式。
+   重みは未検証（ゲームの理屈から置いた値）なので、内訳を必ず画面に出す。 */
+const PLACE_WEIGHTS = {
+  carry_exposure: 3.0,    // キャリーが初期ターゲットにされる期待人数
+  carry_immediate: 4.0,   // 開幕から射程内に入っている敵の数
+  carry_downtime: 0.5,    // キャリーが撃ち始めるまでの秒数
+  enemy_carry_gap: -0.6,  // 相手キャリーからの距離（遠いほど良い）
+  frontline_gap: -0.9,    // 相手前衛の塊からの距離（遠いほど良い）
+  leap_risk: 5.0,         // 跳躍で直接飛んでこられる位置か
+  screen: -0.8,           // 自分の前衛が盾になっている度合い
+  aoe_clump: 0.7,         // 相手の AoE 1発で巻き込まれる最大数
+};
+const PLACE_LABEL = {
+  carry_exposure:'キャリーが狙われる期待人数', carry_immediate:'開幕から射程内の敵',
+  carry_downtime:'撃ち始めるまでの秒数', enemy_carry_gap:'相手キャリーからの距離',
+  frontline_gap:'相手前衛からの距離', leap_risk:'跳躍で飛ばれる危険',
+  screen:'盾になっている味方の数', aoe_clump:'AoE 1発で巻き込まれる最大数',
+};
+
+function worstAoe(units, side, radius){
+  let best = 0;
+  const mine = units.filter(u=>u.side===side);
+  for(let r=0;r<B_ROWS;r++) for(let c=0;c<B_COLS;c++){
+    let n=0;
+    mine.forEach(u=>{ if(hexDist([c,r], u.hex) <= radius) n++; });
+    if(n>best) best=n;
+  }
+  return best;
+}
+
+function evaluatePlacement(own, enemy, carryName){
+  const units = own.concat(enemy);
+  const ci = units.findIndex(u=>u.name===carryName);
+  if(ci < 0) return null;
+  const carry = units[ci];
+  const t = threatOn(units, ci);
+  const foes = units.filter(u=>u.side==='enemy');
+
+  const myRange = carry.range || 1;
+  const gaps = foes.map(f=>Math.max(0, hexDist(carry.hex, f.hex) - myRange));
+  // ÷2 は「相手も近づいてくる」ぶん
+  const downtime = gaps.length ? Math.min.apply(null, gaps) * SECONDS_PER_HEX / 2 : 0;
+
+  const ec = foes.find(f=>f.role==='carry');
+  const ecGap = ec ? hexDist(carry.hex, ec.hex) : 0;
+
+  const fl = foes.filter(f=>(f.range||1)<=1).map(f=>hexDist(carry.hex, f.hex))
+                 .sort((a,b)=>a-b);
+  const flGap = fl.length ? (fl.slice(0,2).reduce((s,x)=>s+x,0) / Math.min(2,fl.length)) : 0;
+
+  let leap = 0;
+  foes.forEach(f=>{
+    if(!f.leap_hexes) return;
+    const d = hexDist(carry.hex, f.hex);
+    if(d <= f.leap_hexes) leap += 1;
+    else if(d <= f.leap_hexes + 2) leap += 0.5;
+  });
+
+  let screen = 0;
+  if(ec){
+    const dc = hexDist(carry.hex, ec.hex);
+    units.forEach((u,i)=>{
+      if(u.side!=='own' || i===ci) return;
+      if(hexDist(u.hex, ec.hex) < dc) screen++;
+    });
+  }
+
+  const parts = {
+    carry_exposure: t.expected,
+    carry_immediate: t.immediate,
+    carry_downtime: +downtime.toFixed(2),
+    enemy_carry_gap: ecGap,
+    frontline_gap: +flGap.toFixed(2),
+    leap_risk: leap,
+    screen: screen,
+    aoe_clump: worstAoe(units, 'own', 1),
+  };
+  let score = 0;
+  Object.keys(parts).forEach(k=>{ score += PLACE_WEIGHTS[k] * parts[k]; });
+  return {score:+score.toFixed(3), parts:parts, threats:t.threats.slice(0,5)};
+}
+
+function placeAgainst(own0, enemy, carryName, rounds){
+  rounds = rounds || 6;
+  let placed = own0.map(u=>Object.assign({}, u));
+  let best = evaluatePlacement(placed, enemy, carryName);
+  for(let rnd=0; rnd<rounds; rnd++){
+    let improved = false;
+    for(let idx=0; idx<placed.length; idx++){
+      const occupied = new Set(placed.filter((u,i)=>i!==idx).map(u=>hexKey(u.hex)));
+      for(const r of OWN_ROWS) for(let c=0;c<B_COLS;c++){
+        const h=[c,r];
+        if(occupied.has(hexKey(h)) || hexKey(h)===hexKey(placed[idx].hex)) continue;
+        const trial = placed.slice();
+        trial[idx] = Object.assign({}, placed[idx], {hex:h});
+        const cand = evaluatePlacement(trial, enemy, carryName);
+        if(cand && cand.score < best.score - 1e-9){ placed = trial; best = cand; improved = true; }
+      }
+    }
+    if(!improved) break;
+  }
+  return {placement: placed, evaluation: best};
+}
+
+function placementReasons(own, enemy, carryName){
+  const units = own.concat(enemy);
+  const foes = units.filter(u=>u.side==='enemy');
+  const ec = foes.find(f=>f.role==='carry');
+  const ci = units.findIndex(u=>u.name===carryName);
+  const carry = units[ci];
+  return own.map((u,i)=>{
+    const t = threatOn(units, units.indexOf(u));
+    const bits = [];
+    if(u.name===carryName){
+      if(ec) bits.push('相手キャリーから '+hexDist(u.hex, ec.hex)+' ヘクス');
+      const fl = foes.filter(f=>(f.range||1)<=1).map(f=>hexDist(u.hex,f.hex)).sort((a,b)=>a-b);
+      if(fl.length) bits.push('相手前衛まで '+fl[0]+' ヘクス');
+      bits.push('狙われる期待人数 '+t.expected.toFixed(1));
+      bits.push(t.immediate ? ('開幕から射程内の敵 '+t.immediate+' 体')
+                            : '開幕は誰の射程にも入っていない');
+      if(t.threats.length) bits.push('最速の敵が '+t.threats[0].seconds+' 秒で到達');
+    } else {
+      const rng = u.range || 1;
+      const near = foes.length ? Math.min.apply(null, foes.map(f=>hexDist(u.hex,f.hex))) : null;
+      if(near !== null){
+        bits.push(near <= rng ? ('開幕から射程内（距離 '+near+' / 射程 '+rng+'）')
+                              : ('最寄りの敵まで '+near+' ヘクス（射程 '+rng+'）'));
+      }
+      if(carry && ec && hexDist(u.hex, ec.hex) < hexDist(carry.hex, ec.hex))
+        bits.push('キャリーより前＝盾になる');
+    }
+    return {unit:u.name, hex:u.hex, isCarry:u.name===carryName, why:bits.join(' / ')};
+  });
+}
+
+/* ---------- 画面 ---------- */
+let boardState = null;
+
+function renderBoard(m){
+  /* 相手の盤面を手で入れて、自分の初期配置を出す。
+     入力を最小にしてある ── 面倒だと使われないので。
+       ・相手キャリー … ユニットを選ぶ（射程が要る。射程4と5で自陣のどこまで届くかが変わる）
+       ・相手前衛     … ヘクスをクリックするだけ。名前は要らない（近接として扱えば足りる）
+     Riot のポリシーが Scouting（対戦中に相手盤面を自動で読むこと）を禁じているので、
+     ここは**手入力しかしない**（docs/03 §5）。 */
+  const ctl=el('div','controls');
+  const sel=el('select');
+  T.units.slice().sort((a,b)=>b.cost-a.cost||a.name.localeCompare(b.name))
+    .forEach(u=>sel.appendChild(new Option(u.name+' (c'+u.cost+') 射程'+(u.base.range||1), u.apiName)));
+  sel.value = (boardState && boardState.carryApi) || carrySel ||
+              T.units.slice().sort((a,b)=>b.stars['2'].auto_dps-a.stars['2'].auto_dps)[0].apiName;
+  const size=el('select');
+  [6,7,8,9,10].forEach(n=>size.appendChild(new Option('盤面 '+n+' 体',n)));
+  size.value = String((boardState && boardState.size) || 8);
+
+  const foeSel=el('select');
+  foeSel.appendChild(new Option('相手キャリー: 未指定',''));
+  T.units.slice().sort((a,b)=>b.cost-a.cost||a.name.localeCompare(b.name))
+    .forEach(u=>foeSel.appendChild(new Option('相手 '+u.name+' 射程'+(u.base.range||1)
+      +(u.leap_hexes?('・跳躍'+u.leap_hexes):''), u.apiName)));
+
+  const mode=el('select');
+  mode.appendChild(new Option('相手キャリーを置く','carry'));
+  mode.appendChild(new Option('相手前衛を置く／消す','front'));
+  const clear=el('button',null,'相手をクリア');
+  clear.style.cssText='background:var(--panel2);color:var(--fg);border:1px solid var(--line);'
+    +'border-radius:5px;padding:4px 10px;cursor:pointer';
+  ctl.append(sel, size, foeSel, mode, clear);
+  m.appendChild(ctl);
+
+  const note=el('div','note');
+  note.innerHTML='幾何の計算だけ。<b>勝敗もダメージ量も出さない。</b>'
+    +'<b>敵陣（上4行）をクリックして相手を置くと、それに合わせた自分の初期配置を出す。</b>'
+    +'相手キャリーはユニットを選んでから置く（射程と跳躍半径が計算に要る）。'
+    +'前衛はヘクスだけでよい。<br>'
+    +'相手を1体も置かなければ「同じ構成の180°回転」を基準線として使う。'
+    +'相手構成は手入力する設計 ── Riot のポリシーが対戦中に相手盤面を自動で読むこと'
+    +'（Scouting）を禁じているため（docs/03 §5）。'
+    +'同距離のタイブレークは未解明なので確率で割っている。'
+    +'移動 '+SECONDS_PER_HEX+'秒/ヘクスは Riot の換算表（240単位/ヘクス）÷移動速度500 から導いた値。';
+  m.appendChild(note);
+
+  const box=el('div'); m.appendChild(box);
+
+  function build(){
+    const carryApi=sel.value, n=parseInt(size.value,10);
+    const comp = solve(carryApi, n, {top:1})[0];
+    if(!comp){ box.innerHTML='<div class="empty">構成を作れませんでした</div>'; return; }
+    const own = defaultFormation(comp.units, carryApi);
+    const prev = boardState || {};
+    // base は毎回の解き直しの出発点。own（表示中の配置）と別に持つ。
+    boardState = {carryApi:carryApi, size:n, base:own,
+                  own:own.map(u=>Object.assign({},u)),
+                  foe: prev.foe || {carryApi:'', carryHex:null, front:[]}};
+    recompute();
+  }
+
+  function enemyUnits(){
+    const f = boardState.foe, out=[];
+    if(f.carryHex){
+      const u = UNIT_MAP[f.carryApi];
+      out.push({name: u ? ('相手'+u.name) : '相手キャリー', side:'enemy', role:'carry',
+                hex:f.carryHex, range: u ? (u.base.range||1) : 4,
+                leap_hexes: u ? (u.leap_hexes||null) : null});
+    }
+    f.front.forEach((h,i)=>out.push({name:'相手前衛'+(i+1), side:'enemy', role:'frontline',
+                                     hex:h, range:1}));
+    return out;
+  }
+
+  function recompute(){
+    const foes = enemyUnits();
+    if(foes.length){
+      const carryName = UNIT_MAP[boardState.carryApi].name;
+      /* ★ 毎回 base（＝defaultFormation）から解き直す ★
+         以前は placeAgainst の結果を boardState.own に書き戻し、次のクリックでは
+         その配置から山登りを続けていた。同じ相手盤面でも、そこに至るクリックの順番で
+         答えが変わる（乱数で作った履歴120通りのうち64通りで結果が違った）。
+         続きから登るぶんが得になるとは限らず、実測では 8勝7敗・平均差 0.007 の誤差。
+         配置は同じ盤面なら同じ答えが出ないと信用できないので、出発点を固定する。
+         tests/board_check.js は defaultFormation から解く経路しか見ていないため、
+         画面だけが別の答えを出していても検出できなかった。 */
+      const r = placeAgainst(boardState.base, foes, carryName);
+      boardState.own = r.placement;
+      boardState.result = r;
+      boardState.reasons = placementReasons(r.placement, foes, carryName);
+    } else {
+      // 相手を消したら初期配置に戻す（前の解が残ると基準線の表示と食い違う）
+      boardState.own = boardState.base.map(u=>Object.assign({},u));
+      boardState.result = null; boardState.reasons = null;
+    }
+    draw();
+  }
+
+  function draw(){
+    const own = boardState.own;
+    const foes = enemyUnits();
+    const baseline = foes.length === 0;
+    let units = own.slice();
+    if(baseline){
+      own.forEach(u=>units.push({name:'敵'+u.name, range:u.range, cost:u.cost,
+                                 side:'enemy', hex:mirrorHex(u.hex)}));
+    } else {
+      units = units.concat(foes);
+    }
+    const byHexOwn={}; own.forEach(u=>byHexOwn[hexKey(u.hex)]=u);
+    const byHexFoe={}; units.filter(u=>u.side==='enemy')
+                            .forEach(u=>byHexFoe[hexKey(u.hex)]=u);
+
+    box.innerHTML='';
+    const wrap=el('div');
+    wrap.style.cssText='display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start';
+
+    // ---- 盤面 ----
+    const bd=el('div');
+    for(let r=0;r<B_ROWS;r++){
+      const row=el('div','hexrow'+((r&1)?' odd':''));
+      for(let c=0;c<B_COLS;c++){
+        const h=[c,r], k=hexKey(h);
+        // own / enemy のクラスは CSS とテストが使う構造上の目印。消さないこと。
+        const cell=el('div','hex '+(r<4?'enemy':'own'));
+        const fo=byHexFoe[k], mine=byHexOwn[k];
+        if(fo){
+          cell.style.background='#4a2230'; cell.style.color='#ffb3c1';
+          cell.title=fo.name+(fo.range?('  射程'+fo.range):'');
+          // 相手キャリーはユニットを選んで置くので絵が出せる。前衛は名前を取らないので文字
+          const fu = fo.role==='carry' ? UNIT_MAP[boardState.foe.carryApi] : null;
+          if(fu){ cell.appendChild(unitIcon(fu, 34));
+                  const b=el('div'); b.textContent='★敵';
+                  b.style.cssText='font-size:9px;line-height:1'; cell.appendChild(b); }
+          else cell.textContent=fo.role==='carry'?'★敵':'敵';
+        } else if(mine){
+          cell.style.background=mine.isCarry?'var(--accent)':'var(--panel2)';
+          cell.title=mine.name+'  射程'+(mine.range||1);
+          const mu = UNIT_MAP[mine.apiName];
+          if(mu){
+            cell.appendChild(unitIcon(mu, mine.isCarry?36:32));
+            if(mine.isCarry){
+              const b=el('div'); b.textContent='★';
+              b.style.cssText='font-size:10px;line-height:1;color:#0b0f14'; cell.appendChild(b);
+            }
+          } else {
+            cell.textContent=mine.isCarry?('★'+mine.name):mine.name;
+            if(mine.isCarry) cell.style.color='#0b0f14';
+          }
+        }
+        if(r<4){
+          cell.style.cursor='pointer';
+          cell.onclick=()=>{
+            const f=boardState.foe;
+            if(mode.value==='carry'){
+              if(!foeSel.value){ alert('先に相手キャリーのユニットを選んでください'); return; }
+              f.carryApi=foeSel.value;
+              f.carryHex=(f.carryHex&&hexKey(f.carryHex)===k)?null:h;
+              f.front=f.front.filter(x=>hexKey(x)!==k);
+            } else {
+              const at=f.front.findIndex(x=>hexKey(x)===k);
+              if(at>=0) f.front.splice(at,1);
+              else if(!(f.carryHex&&hexKey(f.carryHex)===k)) f.front.push(h);
+            }
+            recompute();
+          };
+        }
+        row.appendChild(cell);
+      }
+      bd.appendChild(row);
+    }
+    const lg=el('div','note');
+    lg.innerHTML='上4行＝敵陣（クリックで入力） / 下4行＝自陣。'
+      +'<span style="background:#4a2230;color:#ffb3c1;padding:1px 5px;border-radius:3px">敵</span> '
+      +'<span style="background:var(--accent);color:#0b0f14;padding:1px 5px;border-radius:3px">★キャリー</span>';
+    bd.appendChild(lg);
+    wrap.appendChild(bd);
+
+    // ---- 結果 ----
+    const side=el('div'); side.style.cssText='flex:1;min-width:320px';
+    if(baseline){
+      side.appendChild(el('div','note',
+        '相手を1体も置いていないので、基準線（同じ構成の180°回転）を表示している。'
+        +'敵陣をクリックして相手キャリーと前衛を置くと、それに合わせた配置を計算する。'));
+      // 基準線でも「キャリーをどこに置くと危ないか」は出す。
+      const ci = units.findIndex(u=>u.isCarry);
+      const safety = carrySafety(units, ci).sort((a,b)=>a.danger-b.danger).slice(0,10);
+      side.appendChild(el('div',null,'')).appendChild(
+        el('b',null,'キャリーを置くヘクスの危険度（安全な順に10件）'));
+      const tbl=el('table'), th=el('thead'), tr=el('tr');
+      ['ヘクス','危険度','狙われる期待人数','開幕から射程内','最速の敵の到達']
+        .forEach(x=>{const e=el('th',null,x);e.style.cursor='default';tr.appendChild(e);});
+      th.appendChild(tr); tbl.appendChild(th);
+      const tb=el('tbody');
+      safety.forEach(x=>{
+        const row=el('tr');
+        row.appendChild(el('td','num','('+x.hex[0]+','+x.hex[1]+')'));
+        row.appendChild(el('td','num',String(x.danger)));
+        row.appendChild(el('td','num',String(x.expected)));
+        row.appendChild(el('td','num',String(x.immediate)));
+        row.appendChild(el('td','num', x.soonest===null?'—':(x.soonest+' 秒')));
+        tb.appendChild(row);
+      });
+      tbl.appendChild(tb);
+      const tw=el('div','tablewrap'); tw.appendChild(tbl); side.appendChild(tw);
+      side.appendChild(el('div','note',
+        '危険度 = 狙われる期待人数 + 1.5×開幕から射程内の敵 + 0.5×詰められやすさ。'
+        +'この重みも未検証。相手を入力すればもっと具体的な採点に切り替わる。'));
+    } else {
+      const ev=boardState.result.evaluation;
+      const h=el('div'); h.appendChild(el('b',null,'この配置の採点（小さいほど良い）： '+ev.score));
+      side.appendChild(h);
+      const tbl=el('table'), th=el('thead'), tr=el('tr');
+      ['項目','値','重み','寄与'].forEach(x=>{const e=el('th',null,x);e.style.cursor='default';tr.appendChild(e);});
+      th.appendChild(tr); tbl.appendChild(th);
+      const tb=el('tbody');
+      Object.keys(ev.parts).forEach(k=>{
+        const v=ev.parts[k], w=PLACE_WEIGHTS[k], row=el('tr');
+        row.appendChild(el('td',null,PLACE_LABEL[k]||k));
+        row.appendChild(el('td','num',String(v)));
+        row.appendChild(el('td','num',String(w)));
+        const cd=el('td','num',(w*v).toFixed(2));
+        if(w*v<0) cd.style.color='var(--ok)'; else if(w*v>0) cd.style.color='var(--bad)';
+        row.appendChild(cd);
+        tb.appendChild(row);
+      });
+      tbl.appendChild(tb);
+      const tw=el('div','tablewrap'); tw.appendChild(tbl); side.appendChild(tw);
+      const wn=el('div','note');
+      wn.innerHTML='重みは<b>未検証</b>。ゲームの理屈から置いた値で、実測で較正していない。'
+        +'内訳を出しているのは、納得できない項があれば読み替えて使えるようにするため。';
+      side.appendChild(wn);
+
+      const rl=el('div'); rl.style.marginTop='10px';
+      rl.appendChild(el('b',null,'なぜそこに置くか'));
+      boardState.reasons.forEach(x=>{
+        const d=el('div','note');
+        d.innerHTML=(x.isCarry?'<b>★'+x.unit+'</b>':x.unit)
+          +' <span class="dim">('+x.hex[0]+','+x.hex[1]+')</span> — '+x.why;
+        rl.appendChild(d);
+      });
+      side.appendChild(rl);
+      const fn=el('div','note');
+      fn.innerHTML='ここで出しているのは<b>初期配置</b>。戦闘が始まったあとの動きは計算していない。'
+        +'相手が動いてきたらそこから先は自分で合わせる前提。';
+      side.appendChild(fn);
+    }
+    wrap.appendChild(side);
+    box.appendChild(wrap);
+  }
+
+  sel.onchange=size.onchange=build;
+  clear.onclick=()=>{ boardState.foe={carryApi:'',carryHex:null,front:[]}; build(); };
+  build();
+}
+
+/* ================= 実測メタ =================
+   op.gg の数万試合から集計された平均順位。理論値とは**別のレイヤー**。
+
+   ★ 混ぜないこと ★
+   平均順位が良い = 最強ではない（docs/00 §3）:
+     - 難易度バイアス … 強いが難しい構成は下手な人が回すと順位が落ちる
+     - コンテスト     … 同じ構成を同卓で複数人が狙うと全員崩れる
+     - ランク帯バイアス … 集計対象の実力で最適解が変わる
+   理論値と食い違う場所が、理論値の取りこぼし（CC・射程・配置・使いやすさ）の在処。 */
+/* ================= トレイト補正 =================
+   理論値はこのユニット単体ではなく「ソルバーが組んだ構成の中にいる状態」で計算している。
+   実戦でキャリーが単騎でいることは無いので、素の値で比べても意味が薄い。
+   何を乗せたか、何を乗せていないかをここで全部出す。
+   乗せていないものを黙って隠すのが、理論値ツールで一番危ない。 */
+function traitBonusCard(unit){
+  const tb = unit.trait_bonus;
+  const c = el('div','card');
+  c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
+  c.appendChild(el('h2',null,'トレイト補正 — '+unit.name));
+  if(!tb){
+    c.appendChild(el('div','note','このユニット向けの構成が組めなかったので、'
+      +'理論値はトレイト補正なし（素の状態）で出している。'));
+    return c;
+  }
+
+  const head = el('div','note');
+  head.innerHTML = 'この画面の理論ダメージは、下の構成でこのユニットに乗るトレイト補正を'
+    + '<b>適用済み</b>の数字。キャリーが単騎で戦うことは実戦では無いので、'
+    + '素の値で比べても意味が薄い。<br>前提の構成： '
+    + tb.comp.map(function(n){ return n===unit.name ? '<b>'+n+' ★</b>' : n; }).join(' / ');
+  c.appendChild(head);
+
+  const act = el('div'); act.style.margin='8px 0';
+  act.appendChild(el('span','dim','発動： '));
+  (tb.active||[]).forEach(function(a){
+    act.appendChild(el('span','tag hit', a.name+' ('+a.minUnits+')'));
+  });
+  c.appendChild(act);
+
+  // 合計の補正量。ここが「いくら盛られているか」の答え。
+  const LBL = {ad:'攻撃力', ap:'呪文力', as:'攻撃速度', hp:'体力',
+               damage_amp:'ダメージ増幅', durability:'耐久', armor:'物理防御',
+               mr:'魔法防御', crit:'クリティカル率', crit_mult:'クリティカル倍率',
+               omnivamp:'オムニヴァンプ', mana_per_second:'毎秒マナ',
+               burn_pct_of_target:'燃焼（相手の最大体力割合）',
+               as_per_attack:'攻撃ごとの攻撃速度'};
+  const sum = el('div'); sum.style.margin='8px 0';
+  let any = false;
+  [['frac','%'],['add','+'],['pct_pt','pt']].forEach(function(m){
+    const o = tb[m[0]] || {};
+    Object.keys(o).forEach(function(k){
+      if(!o[k]) return;
+      any = true;
+      let v;
+      if(m[0]==='frac') v = '+'+Math.round(o[k]*1000)/10+'%';
+      // ★ pct_pt は100倍しない ★
+      // frac は割合（0.30 → +30%）だが、pct_pt は**パーセントそのもの**で入ってくる
+      // （src/engine/traits.py が 30.0 のまま渡し、受け取る combat.py 側で /100 している）。
+      // frac の式をそのまま使い回していたので、唯一 pct_pt を持つ Kog'Maw の
+      // shred_sunder が「+3000pt」と出ていた。正しくは +30pt。
+      else if(m[0]==='pct_pt') v = '+'+Math.round(o[k]*10)/10+'pt';
+      else v = '+'+fmt(o[k]);
+      const sp = el('span','tag hit', (LBL[k]||k)+' '+v);
+      sp.style.fontSize='13px';
+      if(tb.caps && tb.caps[k]) sp.title = '上限 '+tb.caps[k]+' スタック';
+      sum.appendChild(sp);
+    });
+  });
+  if(!any) sum.appendChild(el('span','dim','このユニットに乗る数値補正は無い（発動トレイトが効果型のみ）。'));
+  c.appendChild(sum);
+
+  function listBlock(title, arr, color, note){
+    if(!arr || !arr.length) return;
+    const h = el('div',null,''); h.style.marginTop='10px';
+    const b = el('b',null,title+'（'+arr.length+'件）');
+    if(color) b.style.color = color;
+    h.appendChild(b); c.appendChild(h);
+    if(note) c.appendChild(el('div','note',note));
+    const ul = el('div','note');
+    ul.innerHTML = arr.map(function(x){
+      return '・'+String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+    }).join('<br>');
+    c.appendChild(ul);
+  }
+
+  listBlock('計算に入れた', tb.applied, 'var(--ok)',
+            '[チーム全体] は盤面の味方全員、[保持者のみ] はそのトレイトを持つユニット、'
+            + '[非保持者のみ] は持たないユニットに乗る。'
+            + '「×0.5」のような係数が付いているものは期待値として割り引いている（理由は各行に書いてある）。');
+  listBlock('条件が判定できないので入れていない', tb.conditional, 'var(--warn)',
+            '相手依存・プレイヤーの選択依存・3星の数などで決まるもの。'
+            + '実戦では乗ることがあるので、この分ここの数字は過小評価になる。');
+  listBlock('効果は分かるがモデルに無い', tb.unmodeled, 'var(--warn)',
+            '回復・シールド・召喚物・相手の防御低下など。'
+            + 'このユニットの単体ダメージの計算には出てこない。');
+  listBlock('意味を特定できていない', tb.unknown, 'var(--bad)',
+            '変数の意味が分からないので反映していない。'
+            + 'ここが0件でないうちは、その分だけ理論値に穴がある。');
+
+  // 量ではないもの（秒数・閾値・経済）は畳んでおく。数は出す。
+  if(tb.skipped && tb.skipped.length){
+    const d = el('details');
+    const sm = el('summary',null,'量ではないので対象外（'+tb.skipped.length+'件）');
+    sm.style.cssText='cursor:pointer;color:var(--dim);font-size:12px;margin-top:10px';
+    d.appendChild(sm);
+    const ul = el('div','note');
+    ul.innerHTML = tb.skipped.map(function(x){ return '・'+x; }).join('<br>');
+    d.appendChild(ul);
+    c.appendChild(d);
+  }
+
+  c.appendChild(el('div','note',
+    '分類は src/engine/traits.py の VARS に1変数ずつ登録してある。'
+    + 'セットデータ側の全変数に登録があることをテストで検査しているので、'
+    + '新しいパッチで変数が増えたら「意味を特定できていない」に出る。'));
+  return c;
+}
+
+/* ================= 予想順位 =================
+   ちゃんと測った上で出している。測った結果は正直に書く:
+   理論ダメージは、コストを知っている上では順位をほぼ説明しなかった（R² +0.000）。
+   だからここの予想順位は理論値からではなく、コストのベースラインと実測から出している。
+   理論値が答えるのは「何秒後に何ダメージ出るか」であって「何位になるか」ではない。 */
+function placeCard(unit){
+  const c = el('div','card');
+  c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
+  c.appendChild(el('h2',null,'予想順位 — '+unit.name));
+  const P = T.meta && T.meta.predict;
+  if(unit.expected_place==null){
+    c.appendChild(el('div','note','このユニットは予想順位を出せていない。'
+      +' <code>python src/predict.py</code> を実行すると生成する。'));
+    return c;
+  }
+
+  const big = el('div');
+  big.style.cssText='display:flex;align-items:baseline;gap:14px;margin:6px 0 10px';
+  const v = el('span',null, String(unit.expected_place));
+  v.style.cssText='font-size:34px;font-weight:700;color:'
+    + (unit.expected_place<4.0?'var(--ok)':unit.expected_place>4.5?'var(--bad)':'var(--fg)');
+  big.appendChild(v);
+  big.appendChild(el('span','dim','位　根拠： '+unit.expected_from));
+  c.appendChild(big);
+
+  if(unit.baseline_place!=null){
+    const d = Math.round((unit.expected_place-unit.baseline_place)*100)/100;
+    const gap = el('div','note');
+    gap.innerHTML = 'コスト'+unit.cost+'のユニットの平均は <b>'+unit.baseline_place+'位</b>。'
+      + 'このユニットはそこから <b>'+(d>0?'+':'')+d+'位</b>'
+      + (d<-0.1 ? '（同コスト帯では<b>良い</b>方）'
+         : d>0.1 ? '（同コスト帯では<b>悪い</b>方）' : '（同コスト帯の平均どおり）');
+    c.appendChild(gap);
+  }
+
+  if(P && P.models){
+    const m = P.models;
+    const tbl=el('table'), th=el('thead'), tr=el('tr');
+    ['説明変数','決定係数 R²','平均絶対誤差'].forEach(function(x){
+      const e=el('th',null,x); e.style.cursor='default'; tr.appendChild(e);});
+    th.appendChild(tr); tbl.appendChild(th);
+    const tb=el('tbody');
+    [['コストのみ','cost'],['理論ダメージのみ','theory'],['コスト＋理論値','cost+theory']]
+      .forEach(function(p){
+        if(!m[p[1]]) return;
+        const row=el('tr');
+        row.appendChild(el('td',null,p[0]));
+        row.appendChild(el('td','num',m[p[1]].r2.toFixed(3)));
+        row.appendChild(el('td','num',m[p[1]].mae.toFixed(3)+' 位'));
+        tb.appendChild(row);
+      });
+    tbl.appendChild(tb);
+    const w=el('div','tablewrap'); w.appendChild(tbl); c.appendChild(w);
+    const warn = el('div','note');
+    warn.style.color='var(--warn)';
+    warn.innerHTML = '<b>理論ダメージは順位の予測にほぼ寄与しない</b>'
+      + '（コストに上乗せする説明力 '
+      + (P.theory_gain_over_cost>=0?'+':'') + P.theory_gain_over_cost + '）。'
+      + 'なのでこの予想順位は理論値からは出していない。'
+      + '理論値が答えるのは「1発いくらで、何秒後に何ダメージ出るか」であって、'
+      + '「何位になるか」ではない。この2つを混ぜないために分けてある。';
+    c.appendChild(warn);
+    if(P.measured_sd){
+      c.appendChild(el('div','note',
+        '実測順位そのもののばらつきは標準偏差 '+P.measured_sd+' 位。'
+        +'予想の誤差がこれと同じくらいなら、それ以上は当てられないという意味になる。'));
+    }
+  }
+  return c;
+}
+
+function measuredCard(unit){
+  const M = T.meta_stats && T.meta_stats.units && T.meta_stats.units[unit.apiName];
+  const c = el('div','card');
+  c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
+  c.appendChild(el('h2',null,'実測メタ — '+unit.name));
+  if(!M){
+    c.appendChild(el('div','note','このユニットの実測データが取れていない。'
+      +' <code>python src/opgg.py --meta</code> を実行すると取得する。'));
+    return c;
+  }
+  const o = M.overall || {};
+  const sub = el('div','note');
+  sub.innerHTML = '出典 <b>'+(T.meta_stats.source||'op.gg')+'</b>。'
+    + (o.totalCount ? ' 全体 '+o.totalCount.toLocaleString()+' 試合：平均順位 <b>'+o.avgPlacement
+       +'</b> / Top4率 '+Math.round((o.top4Rate||0)*100)+'% / 1位率 '+Math.round((o.winRate||0)*100)+'%' : '')
+    + '<br><b>平均順位が良い＝最強ではない。</b>'
+    + '難易度バイアス・コンテスト・ランク帯バイアスが乗っている（docs/00 §3）。'
+    + '理論値と食い違う場所こそ、理論値が取りこぼしている要素の在処。';
+  c.appendChild(sub);
+
+  if(!M.items || !M.items.length){
+    c.appendChild(el('div','note','十分な試合数のアイテム組が無い。'));
+    return c;
+  }
+
+  /* 理論値側の順位と突き合わせる。
+     ★ 突き合わせる相手は unit.bis 以外にない ★
+     ここは以前、画面の JS 側で組み直した**別のモデル**（recommendItems の
+     「スキル型との相性」順）を『理論値での順位』として出していた。
+     同じ画面の上に出ている「理想アイテム」表は Python の Fight で積分した
+     合計ダメージ順（unit.bis）なので、1枚のカードに理論値が2種類並んでいた。
+     しかも AD型/AP型で分けるつもりの三項演算子が両枝とも byFit のまま（書きかけ）で、
+     ユニットの型で切り替わってすらいなかった。
+     この列の用は「上の表の1位に実測の裏付けがあるか」を見ることなので、
+     上の表と同じ順位でなければ何も確かめられない。 */
+  const key = a => a.slice().sort().join('|');
+  const theoryRank = {};
+  (unit.bis||[]).forEach((b,i)=>{ theoryRank[key(b.items)] = i+1; });
+
+  const rows = M.items.slice().sort((a,b)=>a.place-b.place);
+  const tbl=el('table'), th=el('thead'), tr=el('tr');
+  ['実測順位','アイテム3個','平均順位','Top4率','1位率','試合数','理論値での順位']
+    .forEach(x=>{const e=el('th',null,x); e.style.cursor='default'; tr.appendChild(e);});
+  th.appendChild(tr); tbl.appendChild(th);
+  const tb=el('tbody');
+  rows.forEach((r,i)=>{
+    const row=el('tr');
+    row.appendChild(el('td','num',String(i+1)));
+    const c2=el('td','wrap');
+    r.names.forEach(n=>c2.appendChild(el('span','tag',n)));
+    row.appendChild(c2);
+    const p=el('td','num',String(r.place));
+    if(r.place<4.0) p.style.color='var(--ok)';
+    else if(r.place>4.5) p.style.color='var(--bad)';
+    row.appendChild(p);
+    row.appendChild(el('td','num',Math.round(r.top4*100)+'%'));
+    row.appendChild(el('td','num',Math.round(r.win*100)+'%'));
+    row.appendChild(el('td','num',r.n.toLocaleString()));
+    const tr_ = theoryRank[key(r.names)];
+    const c7=el('td','num', tr_ ? String(tr_)+'位' : '圏外');
+    if(!tr_) c7.style.color='var(--dim)';
+    row.appendChild(c7);
+    tb.appendChild(row);
+  });
+  tbl.appendChild(tb);
+  const w=el('div','tablewrap'); w.appendChild(tbl); c.appendChild(w);
+
+  const hit = rows.filter(r=>theoryRank[key(r.names)]).length;
+  c.appendChild(el('div','note',
+    '実測の上位 '+rows.length+' 組のうち、理論値（上の「理想アイテム」表）の上位 '
+    +(unit.bis||[]).length+' 組にも入っているのは '+hit+' 組。'
+    +'一致しない組は「理論値では説明できない強さ」＝ CC・射程・積み上げ・使いやすさの寄与。'));
+  return c;
+}
+
+/* ================= 秒数別の推移 =================
+   「何秒生きられるか」で最適なアイテムは変わる。
+   8秒しか持たないならスキルを回す方が上、16秒持つならグインソーが効いてくる、
+   というのを1点の値ではなく推移で見るための区画。
+   相手の構成で生存時間は変わるので、どの秒数で見るかは使う人が決める。 */
+function timelineCard(unit){
+  const c = el('div','card');
+  c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
+  c.appendChild(el('h2',null,'秒数別の推移 — '+unit.name));
+
+  const base = unit.base || {};
+  const st2 = unit.stars && unit.stars['2'] || {};
+  const head = el('div','note');
+  const interval = base.attackSpeed ? (1/base.attackSpeed).toFixed(2) : '—';
+  head.innerHTML =
+    '素の状態: 通常攻撃1発 <b>'+fmt(st2.ad)+'</b>（クリ込みの期待値ではない素のAD）を '
+    + '<b>'+interval+'秒ごと</b>（攻撃速度 '+fmt(base.attackSpeed)+'）'
+    + '　マナ <b>'+fmt(base.initialMana)+' → '+fmt(base.mana)+'</b>'
+    // ★ 初回詠唱は cast_interval ではなく first_cast ★
+    // cast_interval は「詠唱の間隔」を閉形式で出した連続近似で、初回までの秒数ではない。
+    // 初回は Fight が1発ずつ数えた離散の値（first_cast）。ユニットタブの
+    // 「8秒で詠唱 0 回（初回 N秒）」も、combat.py の較正もこちらを使っている。
+    // ここだけ cast_interval を出していたので Lux が 8.93秒（正しくは 8.75秒）、
+    // 両方持つ67体すべてで 0.18〜2.00秒（平均1.00秒）遅く出ていた。
+    // first_cast が無いのは「戦闘時間の3倍まで延ばしても撃てなかった」ケース（7体）。
+    // 黙って消すと撃てない体と撃てる体が同じ顔になるので、そう書く。
+    + (st2.first_cast ? '　初回詠唱まで <b>'+fmt(st2.first_cast)+'秒</b>'
+       : (st2.cast_interval ? '　初回詠唱 <b>なし</b>（戦闘時間の3倍まで延ばしても撃てない）' : ''))
+    + (unit.ability && unit.ability.hits_per_cast > 1
+        ? '　1詠唱で <b>'+unit.ability.hits_per_cast+'発</b>当たる' : '');
+  c.appendChild(head);
+
+  function table(title, rows, note){
+    if(!rows || !rows.length) return;
+    c.appendChild(el('div',null,'')).appendChild(el('b',null,title));
+    if(note) c.appendChild(el('div','note',note));
+    const tbl=el('table'), th=el('thead'), tr=el('tr');
+    ['経過','合計ダメージ','平均DPS','通常攻撃','スキル','継続','通常の割合','攻撃/詠唱']
+      .forEach(x=>{const e=el('th',null,x); e.style.cursor='default'; tr.appendChild(e);});
+    th.appendChild(tr); tbl.appendChild(th);
+    const tb=el('tbody');
+    rows.forEach(function(r){
+      const row=el('tr');
+      row.appendChild(el('td','num',r.sec+'秒'));
+      row.appendChild(el('td','num',r.total.toLocaleString()));
+      row.appendChild(el('td','num',fmt(r.dps)));
+      row.appendChild(el('td','num',r.auto.toLocaleString()));
+      row.appendChild(el('td','num',r.ability.toLocaleString()));
+      row.appendChild(el('td','num',r.burn?r.burn.toLocaleString():'—'));
+      // 通常攻撃とスキルの比率を棒で見せる
+      const c7=el('td');
+      const bar=el('span');
+      bar.style.cssText='display:inline-block;height:9px;border-radius:2px;'
+        +'background:linear-gradient(90deg,var(--c3) '+r.auto_pct+'%,var(--c4) '+r.auto_pct+'%);'
+        +'width:80px;vertical-align:-1px';
+      bar.title='通常 '+r.auto_pct+'% / スキル '+r.ability_pct+'%';
+      c7.appendChild(bar);
+      c7.appendChild(el('span','dim',' '+r.auto_pct+'%'));
+      row.appendChild(c7);
+      row.appendChild(el('td','num',r.attacks+'/'+r.casts));
+      tb.appendChild(row);
+    });
+    tbl.appendChild(tb);
+    const w=el('div','tablewrap'); w.appendChild(tbl); c.appendChild(w);
+  }
+
+  table('アイテムなし', unit.timeline_bare,
+        '素の性能。ここからアイテムでどれだけ伸びるかを見る。');
+  if(unit.timeline_bis && unit.bis && unit.bis.length){
+    table('理論値1位のアイテム: '+unit.bis[0].items.join(' + '), unit.timeline_bis,
+          '積み上げ系が入っている場合、後半ほど伸びる。'
+          + '短い戦闘しか想定しないなら別の組み合わせの方が上になる。');
+  }
+
+  c.appendChild(el('div','note',
+    '青＝通常攻撃 / 紫＝スキル の割合。'
+    + 'スキルの比率が高いユニットは、マナを回すアイテム（Blue Buff・Spear of Shojin）が効く。'
+    + '通常攻撃の比率が高いユニットは攻撃速度とADが効く。'));
+  c.appendChild(el('div','note',
+    '相手の構成によって何秒生きられるかは変わる。そこは使う人が判断する前提で、'
+    + 'ここでは推移だけを出している。'));
+  return c;
+}
+
+/* ================= この構成に噛み合うオーグメント =================
+   キャラ → 構成 → オーグメント の流れをここで閉じる。
+   並びは「噛み合いの根拠の数」であって強さの順位ではない（実測が無いため）。 */
+function augMatchCard(comp, carry){
+  const c = el('div','card');
+  c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
+  c.appendChild(el('h2',null,'この構成に噛み合うオーグメント — '+carry.name));
+  const ctx = {units: comp.units, carry: carry,
+               traits: (comp.active||[]).map(a=>a.name), taken: []};
+  const rec = recommendAugments(ctx, 12);
+  const sub = el('div','note');
+  sub.innerHTML = '発動中: ' + (ctx.traits||[]).join(' / ')
+    + '<br><b>「順位が上がる順」ではない。</b>噛み合いの根拠が何本あるかで並べている。'
+    + 'オーグメントの組み合わせ別の実測成績はどのデータ源にも無いので、強さの順位は付けられない。'
+    + '対戦中に取ったものを踏まえて絞りたいときは、上のモードを「対戦中」にする。';
+  c.appendChild(sub);
+  if(!rec.length){
+    c.appendChild(el('div','note','噛み合いの根拠があるものが見つからない。'));
+    return c;
+  }
+  const tbl=el('table'), th=el('thead'), tr=el('tr');
+  ['噛み合い','レアリティ','オーグメント','根拠'].forEach(x=>{
+    const e=el('th',null,x); e.style.cursor='default'; tr.appendChild(e);});
+  th.appendChild(tr); tbl.appendChild(th);
+  const tb=el('tbody');
+  rec.forEach(x=>{
+    const row=el('tr');
+    row.appendChild(el('td',null,whySummary(x.why)));
+    row.appendChild(el('td',null,x.aug.rarity||'?'));
+    row.appendChild(el('td',null,x.aug.name));
+    row.appendChild(whyCell(x.why));
+    tb.appendChild(row);
+  });
+  tbl.appendChild(tb);
+  const w=el('div','tablewrap'); w.appendChild(tbl); c.appendChild(w);
+  c.appendChild(el('div','note',
+    '「名指し（強）」は、そのオーグメントの説明文がこの構成のトレイトやユニットを'
+    + '実際に書いているという意味。Riot の文面が根拠なので確か。'
+    + 'それ以外は効果の軸が合うかどうかで、こちらは説明文からの分類（推定）。'));
+  return c;
+}
+
+/* ---------- キャリー逆引き画面 ---------- */
+// 開いた瞬間に中身が出るよう、通常DPS が最も高いユニットを既定のキャリーにする
+let carrySel=(T.units.slice().sort((a,b)=>b.stars['2'].auto_dps-a.stars['2'].auto_dps)[0]||{}).apiName||null;
+let carrySize=8;
+const carryExclude=new Set();
+
+function renderCarry(m){
+  const ctl=el('div','controls');
+  const sel=el('select');
+  sel.appendChild(new Option('キャリーを選ぶ…',''));
+  T.units.slice().sort((a,b)=>b.cost-a.cost||a.name.localeCompare(b.name))
+    .forEach(u=>sel.appendChild(new Option(u.name+' (c'+u.cost+') — '+u.traits.join('/'),u.apiName)));
+  if(carrySel) sel.value=carrySel;
+  const size=el('select');
+  [6,7,8,9,10].forEach(n=>size.appendChild(new Option('盤面 '+n+' 体（Lv'+n+'）',n)));
+  size.value=String(carrySize);
+  ctl.append(sel,size);
+  const status=el('span','dim'); ctl.appendChild(status);
+  m.appendChild(ctl);
+
+  const note=el('div','note');
+  note.innerHTML='トレイトの噛み合いが最良になる並びをビーム探索で求める。'+
+    '<b>アイテム・配置・駒の引きやすさ・実戦の勝率は入っていない。</b>'+
+    'キャリー自身のトレイトは2倍に重み付け。同じチャンピオンの別版（Lux など）は同時に置けない扱い。';
+  m.appendChild(note);
+
+  if(carryExclude.size){
+    const ex=el('div','note');
+    ex.appendChild(document.createTextNode('除外中： '));
+    Array.from(carryExclude).forEach(a=>{
+      const s=el('span','tag',UNIT_MAP[a].name+' ×');
+      s.style.cursor='pointer';
+      s.onclick=function(){ carryExclude.delete(a); render(); };
+      ex.appendChild(s);
+    });
+    m.appendChild(ex);
+  }
+
+  const box=el('div'); m.appendChild(box);
+
+  function run(){
+    const api=sel.value;
+    carrySize=parseInt(size.value,10);
+    if(!api){ box.innerHTML='<div class="empty">キャリーを選ぶと構成を計算します</div>'; return; }
+    carrySel=api;
+    status.textContent='計算中…';
+    box.innerHTML='';
+    setTimeout(function(){
+      const t0=Date.now();
+      const res=solve(api, carrySize, {top:3, exclude:Array.from(carryExclude)});
+      status.textContent=(Date.now()-t0)+' ms';
+      if(!res.length){ box.innerHTML='<div class="empty">解が見つかりませんでした</div>'; return; }
+      res.forEach(function(r,i){
+        const c=el('div','card');
+        c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
+        c.appendChild(el('h2',null,'案'+(i+1)+'　スコア '+r.score+'　合計コスト '+r.totalCost));
+        const tbl=el('table'), th=el('thead'), htr=el('tr');
+        ['C','ユニット','トレイト','通常DPS 2★','EHP 2★',''].forEach(function(x){
+          const e=el('th',null,x); e.style.cursor='default'; htr.appendChild(e);});
+        th.appendChild(htr); tbl.appendChild(th);
+        const tb=el('tbody');
+        r.units.forEach(function(u){
+          const tr=el('tr');
+          const c1=el('td'); c1.appendChild(costChip(u.cost)); tr.appendChild(c1);
+          const c2=el('td');
+          c2.style.cssText='display:flex;align-items:center;gap:7px';
+          c2.appendChild(unitIcon(UNIT_MAP[u.apiName]||u, 26));
+          if(u.apiName===r.carryApi){ const b=el('b',null,u.name+' ★'); b.style.color='var(--accent)'; c2.appendChild(b); }
+          else c2.appendChild(document.createTextNode(u.name));
+          tr.appendChild(c2);
+          const c3=el('td','wrap');
+          u.traits.forEach(function(t){
+            let on=false;
+            r.active.forEach(function(a){ if(a.name===t) on=true; });
+            c3.appendChild(el('span','tag'+(on?' hit':''),t));
+          });
+          tr.appendChild(c3);
+          tr.appendChild(el('td','num',fmt(u.stars['2'].auto_dps)));
+          tr.appendChild(el('td','num',fmt(u.stars['2'].ehp_p)));
+          const c6=el('td');
+          if(u.apiName!==r.carryApi){
+            const x=el('button',null,'除外');
+            x.style.cssText='background:var(--panel2);color:var(--dim);border:1px solid var(--line);border-radius:4px;padding:0 6px;cursor:pointer;font-size:11px';
+            x.onclick=function(e){ e.stopPropagation(); carryExclude.add(u.apiName); render(); };
+            c6.appendChild(x);
+          }
+          tr.appendChild(c6);
+          tb.appendChild(tr);
+        });
+        tbl.appendChild(tb);
+        const w=el('div','tablewrap'); w.appendChild(tbl); c.appendChild(w);
+
+        const act=el('div'); act.style.marginTop='10px';
+        act.appendChild(el('span','dim','発動中： '));
+        r.active.forEach(function(a){
+          const s=el('span','tag hit',a.name+' ('+a.minUnits+')');
+          const vars=Object.keys(a.variables||{}).map(function(k){return k+'='+fmt(a.variables[k]);}).join(', ');
+          if(vars) s.title=vars;
+          act.appendChild(s);
+        });
+        c.appendChild(act);
+        if(r.dead.length){
+          const dd=el('div','note');
+          dd.textContent='あと少しで届くトレイト： '+r.dead.map(function(a){
+            return a.name+' あと'+a.needs+'体';}).join('  /  ');
+          c.appendChild(dd);
+        }
+        box.appendChild(c);
+      });
+      // キャラ → 構成 → オーグメント の順で並べる
+      if(res && res[0]) box.appendChild(augMatchCard(res[0], UNIT_MAP[api]));
+      box.appendChild(traitBonusCard(UNIT_MAP[api]));
+      box.appendChild(timelineCard(UNIT_MAP[api]));
+      box.appendChild(itemCard(UNIT_MAP[api]));
+      box.appendChild(placeCard(UNIT_MAP[api]));
+      box.appendChild(measuredCard(UNIT_MAP[api]));
+    },10);
+  }
+  sel.onchange=run;
+  size.onchange=run;
+  run();
+}
+
+render();
+</script>
+</body>
+</html>
