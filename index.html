@@ -4,6 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TFT 構成ラボ</title>
+<!-- ホーム画面に置いたときの見た目。図案は自作なので再配布の問題は無い。
+     六角形＝盤面の1マス。青→金はコスト色の両端（1コスト灰〜5コスト金）から取った。
+     iOS は角を自分で丸めるので、透明を残さず全面を塗ってある。 -->
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TFT ラボ">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#11151c">
+<link rel="manifest" href="manifest.webmanifest">
 <style>
 :root{
   --bg:#11151c; --panel:#171d26; --panel2:#1d2530; --line:#2a3442;
@@ -1938,6 +1949,24 @@ const FREE_TRAITS = new Set(T.traits
 const UNIT_MAP = {};
 T.units.forEach(u=>UNIT_MAP[u.apiName]=u);
 
+/* ★ オーグメントを取らないと成立しない段 ★
+   配信データの tiers には「オーグメントが要る」という条件が入っていないので、
+   取れていない前提の段を無条件のボーナスとして数えてしまう。
+
+   Set18 の該当は Rival だけ:
+     トレイト1段目 "Only active while fielding 1 Rival."
+     オーグメント Unrivaled(Gold) "You can field Rengar and Kha'Zix together
+                                   with **no penalties**"
+     → 「no penalties」＝通常は併用にペナルティがある。
+
+   入れる前は74軸中36件で Rival 2体が選ばれていた（1体は0件）。
+   なお **1段目も style5 / maxUnits=25000** なので「2体以上の段だけ落とす」では
+   1件も変わらない。配信データの maxUnits がその段の本文と矛盾しているので、
+   本文を正としてトレイトごと落とす。
+   src/engine/comps.py の AUGMENT_GATED と同じ規則。**片方だけ直さないこと。** */
+const AUGMENT_GATED = { 'Rival': {at:2, aug:'Unrivaled'} };
+let heldAugments = new Set();
+
 function activated(apis){
   const counts={};
   apis.forEach(a=>UNIT_MAP[a].traits.forEach(t=>counts[t]=(counts[t]||0)+1));
@@ -1945,8 +1974,21 @@ function activated(apis){
   for(const name of Object.keys(counts)){
     const n=counts[name], t=TRAIT_MAP[name];
     if(!t) continue;
+    const g = AUGMENT_GATED[name];
+    if(g && n >= g.at && !heldAugments.has(g.aug)){
+      // オーグメント前提の人数に達した。トレイトごと発動しない。
+      out.push({name:name, count:n, minUnits:null, style:0, gated:g.aug});
+      continue;
+    }
     let best=null;
-    t.tiers.forEach(tier=>{ if(tier.minUnits!=null && n>=tier.minUnits) best=tier; });
+    // 同じ人数で複数の段が成立するときは **style が高い方**を採る。
+    // 従来は「最後に一致した段」だったので、Rival 1体のときに
+    // style1(=1.0) を採って style5(=5.0) を捨てていた。
+    t.tiers.forEach(tier=>{
+      if(tier.minUnits==null || n < tier.minUnits) return;
+      if(tier.maxUnits!=null && n > tier.maxUnits) return;
+      if(!best || (tier.style||0) > (best.style||0)) best=tier;
+    });
     if(best) out.push({name:name, count:n, minUnits:best.minUnits, style:best.style, variables:best.variables});
     else out.push({name:name, count:n, minUnits:null, style:0, needs:(t.breakpoints[0]||0)-n});
   }
