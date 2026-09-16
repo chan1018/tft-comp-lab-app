@@ -299,6 +299,23 @@ function backlineTag(u, opts){
   if(st.key==='none' && opts && opts.hideNone) return el('span','dim','—');
   const s = el('span', st.cls, st.label);
   s.title = st.title;
+  // ★ title はスマホでは読めない ★
+  // 判定の根拠（原文と一言説明）はこのツールの肝なのに、ホバーできない端末では
+  // 一生表示されなかった。押したらその場に出す。
+  if(st.key !== 'none'){
+    s.style.cursor = 'pointer';
+    s.onclick = (ev) => {
+      ev.stopPropagation();
+      const host = s.parentNode;
+      const open = host && host.querySelector('.bl-why');
+      if(open){ open.remove(); return; }
+      const d = el('div','note bl-why');
+      d.style.cssText = 'white-space:pre-wrap;margin:4px 0 0;'
+        + 'border-left:2px solid var(--line);padding-left:7px';
+      d.textContent = st.title;
+      if(host) host.appendChild(d);
+    };
+  }
   return s;
 }
 /* 判定の守備範囲そのものを画面に出す。0件でも枠を残す（黙って落ちるのを防ぐ） */
@@ -1532,9 +1549,18 @@ function renderRank(m){
   capn.innerHTML =
     '<b>出すのは「理論上どれだけ火力が出るか」まで。何位になるかは出さない。</b>'
     + '実測と突き合わせたところ、コストを知っている上では理論ダメージは平均順位を'
-    + 'ほとんど説明しなかった（R² の増分 <b>'
-    + (gain==null ? '+0.00' : (gain>=0?'+':'') + gain.toFixed(3)) + '</b>）。'
-    + '<br>一方 <b>コスト単独で R²=' + (r2cost==null ? '0.55' : r2cost.toFixed(2)) + '</b>。'
+    + 'ほとんど説明しなかった'
+    + (gain==null ? '' : '（R² の増分 <b>' + ((gain>=0?'+':'') + gain.toFixed(3)) + '</b>）')
+    + '。'
+    + '<br>一方 <b>コスト単独で'
+    // ★ 無い数字をハードコードで補わない ★
+    // 公開版は predict（実測順位を目的変数にした回帰）を落としてあるので、
+    // ここは必ず null になる。前は '0.55' と書いて実測値の顔で出していた。
+    // データが無いときは「無い」と言う。
+    + (r2cost==null
+        ? ' R² が出せる（この版には実測の回帰結果を含めていないので数値は出さない）'
+        : ' R²=' + r2cost.toFixed(2))
+    + '</b>。'
     + 'つまりこの並びの大半はコストの並びで、74体を一列にしても'
     + '「高コストが上にいる」しか読めない。<b>コスト帯で絞ってから比べること。</b>'
     + '<br>理論火力＝BiS（最良の3アイテム）を持たせて '
@@ -2388,8 +2414,15 @@ const SECONDS_PER_HEX = (function(){
 /* ---------- ユニットのアイコン ----------
    画像は app/img/ にあるが **git には入れていない**（Riot の資産なので再配布しない）。
    取得は python src/fetch_images.py。
-   **画像が1枚も無くても画面は成立する**ようにしてある:
-   読み込みに失敗したら、そのユニットの頭文字＋コスト色の丸に差し替える。 */
+
+   ★ 公開サイトでは相対パスが全部 404 になっていた ★
+   app/img/ を配らないので当然だが、結果として74体すべてが文字の丸になっていた。
+   いまは Community Dragon の URL（img_cdn）を second source として持っている。
+   74/74 体に tileIcon があり、CORS も開いているので全員にアイコンが出る。
+   **こちらで画像を配らないので再配布にはならない。**
+
+   3段で落ちる: ローカルの img/ → Community Dragon → 頭文字＋コスト色の丸。
+   どこまで落ちても画面は成立する。 */
 const COST_COLOR = {1:'#8b98a8', 2:'#7bc86c', 3:'#6ea8fe', 4:'#c792ea', 5:'#e0a33e'};
 
 function unitIcon(unit, px){
@@ -2407,11 +2440,23 @@ function unitIcon(unit, px){
     wrap.style.fontSize = Math.round(px*0.5)+'px';
     wrap.style.color = COST_COLOR[unit.cost] || 'var(--fg)';
   };
-  if(!unit.img){ fallback(); return wrap; }
+  const srcs = [unit.img, unit.img_cdn].filter(function(x,i,a){
+    return x && a.indexOf(x)===i;
+  });
+  if(!srcs.length){ fallback(); return wrap; }
   const im = el('img');
-  im.src = unit.img; im.alt = unit.name; im.loading = 'lazy';
+  im.alt = unit.name; im.loading = 'lazy';
   im.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
-  im.onerror = () => { wrap.innerHTML=''; fallback(); };
+  // ローカルの img/ が無い環境（公開サイト）では Community Dragon に取りに行く。
+  // 画像をこちらで配らずに全員へアイコンを出すための道。
+  // どちらも駄目なら頭文字＋コスト色の丸に落ちる（画面は壊れない）。
+  let at = 0;
+  im.onerror = () => {
+    at += 1;
+    if(at < srcs.length){ im.src = srcs[at]; return; }
+    wrap.innerHTML=''; fallback();
+  };
+  im.src = srcs[0];
   wrap.appendChild(im);
   return wrap;
 }
