@@ -3191,9 +3191,112 @@ const ONE_UNIT_TIER_VALUE = 1.0;
    src/engine/comps.py の TIER_COMMITMENT_EXP と同じ値にすること。 */
 const TIER_COMMITMENT_EXP = 0.6;
 
+/* ================= 盤面の実戦力 =================
+   ★ 構成スコアに「ユニットの強さ」の項が1つも無かった ★
+   以前の式は Σ(トレイトの価値) − 0.06×合計コスト だけで、
+   5コストと1コストはトレイト寄与が同じならスコア上まったく同じだった
+   （しかも5コストは減点される側）。
+   ユーザーの3つの指摘が全部これが根:
+     ・「単純にコストのパワーが高い」（5コスト構成が強い）
+     ・「Defender 6 で耐えるのが強い」（防御 +120×6 = 720 が式に無い）
+     ・「Cassiopeia の毒が時間で無限に伸びる」（時間軸が式に無い）
+
+   実戦力 = sqrt( 保つ秒数 × 盤面の秒間ダメージ × その秒数での伸び )
+   保つ秒数 = 盤面の実効耐久 / 被弾800DPS（上限30秒）。**被弾DPSと上限は未検証。**
+
+   ★ ここで火力を計算しない ★
+   このアプリは画面で戦闘を再計算しない設計。Python が出した表（T.power）を
+   引いて足すだけ。式は src/engine/comps.py の board_power と同じ。
+   **片方だけ直さないこと。** */
+const POWER = (T.power && !T.power.error) ? T.power : null;
+const POWER_WEIGHT = POWER ? (POWER.weight || 0) : 0;
+const _growthGrid = {};   // apiName -> 1秒刻みの伸び
+
+function growthAt(api, sec){
+  let g = _growthGrid[api];
+  if(!g){
+    const curve = (POWER.units[api]||[])[2] || [[8,1]];
+    const lo = POWER.ladder[0], hi = POWER.horizon;
+    g = [];
+    for(let t=lo; t<=hi; t++){
+      let v;
+      if(t <= curve[0][0]) v = curve[0][1];
+      else {
+        v = curve[curve.length-1][1];
+        for(let i=0;i<curve.length-1;i++){
+          const a0=curve[i], a1=curve[i+1];
+          if(t <= a1[0]){ v = a0[1] + (a1[1]-a0[1])*(t-a0[0])/(a1[0]-a0[0]); break; }
+        }
+      }
+      g.push(v);
+    }
+    _growthGrid[api] = g;
+  }
+  let idx = Math.floor(sec) - Math.floor(POWER.ladder[0]);
+  if(idx < 0) idx = 0;
+  if(idx >= g.length) idx = g.length - 1;
+  return g[idx];
+}
+
+function boardPower(apis, acts){
+  if(!POWER) return null;
+  const dps = {};
+  let ehp = 0;
+  for(const a of apis){
+    const base = POWER.units[a];
+    if(!base) return null;
+    dps[a] = base[0];
+    ehp += base[1];
+  }
+  // トレイトの段が各駒に足す差分。Python が (段, 駒) で焼いてある。
+  acts.forEach(function(act){
+    if(!act.style) return;
+    const per = POWER.tiers[act.name + '|' + act.minUnits];
+    if(!per) return;
+    for(const a of apis){
+      const d = per[a];
+      if(!d) continue;
+      dps[a] += d[0];
+      ehp += d[1];
+    }
+  });
+  const seconds = ehp / POWER.incoming_dps;
+  const t = Math.min(seconds, POWER.horizon);
+  let boardDps = 0;
+  for(const a of apis){
+    if(dps[a] <= 0) continue;
+    boardDps += dps[a] * growthAt(a, t);
+  }
+  return {value: Math.sqrt(t * boardDps), seconds: seconds,
+          capped: seconds > POWER.horizon, boardDps: boardDps, boardEhp: ehp};
+}
+
+/* 「中央値の駒を size 体並べただけの盤面」を 1.0 とする基準。
+   重みを「平均的な盤面で何点ぶんか」として読めるようにするため。 */
+const _powerRef = {};
+function powerReference(size){
+  if(!POWER) return null;
+  if(_powerRef[size] !== undefined) return _powerRef[size];
+  const ds = Object.keys(POWER.units).map(a=>POWER.units[a][0]).sort((x,y)=>x-y);
+  const es = Object.keys(POWER.units).map(a=>POWER.units[a][1]).sort((x,y)=>x-y);
+  const medD = ds[Math.floor(ds.length/2)], medE = es[Math.floor(es.length/2)];
+  const t = Math.min(size*medE/POWER.incoming_dps, POWER.horizon);
+  const ref = Math.sqrt(t * size * medD);
+  _powerRef[size] = ref || null;
+  return _powerRef[size];
+}
+function powerRatio(apis, acts){
+  const bp = boardPower(apis, acts);
+  if(!bp) return 0;
+  const ref = powerReference(apis.length);
+  if(!ref) return 0;
+  return bp.value / ref;
+}
+
 function scoreOf(apis, axisTraits, axisWeight){
   let total=0, axisHit=0;
-  activated(apis).forEach(a=>{
+  const _acts = activated(apis);
+  _acts.forEach(a=>{
     if(!a.style) return;
     if(FREE_TRAITS.has(a.name)) return;   // 選択の余地が無い
     let v=STYLE_VALUE[a.style]||1;
@@ -3207,6 +3310,9 @@ function scoreOf(apis, axisTraits, axisWeight){
   });
   apis.forEach(a=>{ total-=COST_PENALTY*UNIT_MAP[a].cost; });
   if(!axisHit) total-=NO_AXIS_TRAIT_PENALTY;
+  // 盤面の実戦力。表が焼かれていない古い data.js では 0 になり、
+  // v1.8 と同じ式に戻る（静かに壊れるのではなく、単に項が無い状態）。
+  if(POWER_WEIGHT) total += POWER_WEIGHT * powerRatio(apis, _acts);
   return total;
 }
 
