@@ -4,17 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TFT 構成ラボ</title>
-<!-- ホーム画面に置いたときの見た目。図案は自作なので再配布の問題は無い。
-     六角形＝盤面の1マス。青→金はコスト色の両端（1コスト灰〜5コスト金）から取った。
-     iOS は角を自分で丸めるので、透明を残さず全面を塗ってある。 -->
-<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
-<link rel="apple-touch-icon" href="icon-180.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="TFT ラボ">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#11151c">
-<link rel="manifest" href="manifest.webmanifest">
 <style>
 :root{
   --bg:#11151c; --panel:#171d26; --panel2:#1d2530; --line:#2a3442;
@@ -133,6 +122,36 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
 /* 「悪い」ではなく「該当しない」ことを示す中立のバッジ（後衛に届かない等） */
 .badge.off{background:var(--panel2);color:var(--dim);border:1px solid var(--line)}
 .note{color:var(--dim);font-size:11.5px;margin:7px 0}
+/* ---- 前提を畳む ----
+   「文字が多すぎる」への対応。**消さずに畳む**。
+   このツールは未検証の前提を画面に出すのが方針なので、消すのは禁止。
+   ただし中身が空でない限り summary に要約を出し、畳んでいても
+   「何か前提がある」ことは常に見えるようにする。 */
+details.premise{border:1px solid var(--line);border-radius:6px;background:var(--panel);
+  margin:8px 0;padding:0}
+details.premise>summary{cursor:pointer;padding:7px 10px;font-size:11.5px;color:var(--dim);
+  user-select:none;list-style:none}
+details.premise>summary::-webkit-details-marker{display:none}
+details.premise>summary:before{content:'▸ ';color:var(--accent)}
+details.premise[open]>summary:before{content:'▾ '}
+details.premise>summary:hover{color:var(--fg)}
+details.premise>.body{padding:0 10px 8px}
+details.premise>.body>.note:first-child{margin-top:0}
+/* 英語の原文。日本語の横／下に出す（原文があるから納得できるものがある） */
+.en{color:var(--dim);font-size:11px}
+details.en-orig{margin:8px 0}
+details.en-orig>summary{cursor:pointer;color:var(--dim);font-size:11.5px}
+/* 何レベルでロールする型か。ランキングで一番見たいものなので大きく出す */
+.roll{display:inline-flex;align-items:center;gap:6px;border-radius:6px;padding:3px 10px;
+  font-weight:700;font-size:13px;border:1px solid var(--line);background:var(--panel2)}
+.roll.lv6{color:#8ed6a6;border-color:#2f5b3f}
+.roll.lv7{color:#8fc0f5;border-color:#2c4a6b}
+.roll.lv8{color:#d3a4e6;border-color:#553a63}
+.roll.lv9{color:#e8c16a;border-color:#6b5524}
+.roll.unknown{color:var(--dim)}
+.rollmini{font-weight:700;font-size:12px}
+.dist{display:inline-flex;gap:3px;align-items:center;flex-wrap:wrap}
+.dist span.n{font-size:11px;color:var(--dim);margin-right:4px}
 .abil{background:var(--panel2);border-radius:6px;padding:9px;font-size:12px;margin:9px 0;
   white-space:pre-wrap;line-height:1.65;overflow-wrap:anywhere}
 .starbox{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:9px 0}
@@ -155,12 +174,21 @@ code{background:var(--panel2);padding:1px 5px;border-radius:3px;font-size:11.5px
     <button data-mode="study" class="on">研究（じっくり）</button>
     <button data-mode="play">対戦中（すぐ引く）</button>
   </span>
+  <!-- 表示は日本語（Riot の正規表記）。英語名は消さずに横に出せるようにしてある。
+       op.gg の実測・オーグメントの名指し・テストは英語名で突き合わせているので、
+       英語名が要る場面が実際にある。 -->
+  <label class="lang" style="display:inline-flex;align-items:center;gap:5px;
+         color:var(--dim);font-size:12px;cursor:pointer">
+    <input type="checkbox" id="showen"> 英語名も出す
+  </label>
 </header>
 <div class="banner" id="banner"></div>
 <div class="tabs" id="tabs"></div>
 <main id="main"></main>
 <footer style="padding:18px;border-top:1px solid var(--line);color:var(--dim);
   font-size:11px;line-height:1.7;margin-top:30px">
+  <span class="dim" style="display:block;margin-bottom:4px">
+  ※ここだけ英語なのは、Riot の開発者ポリシーが求める定型文をそのまま載せているため。</span>
   tft-comp-lab isn't endorsed by Riot Games and doesn't reflect the views or opinions of
   Riot Games or anyone officially involved in producing or managing Riot Games properties.
   Riot Games and all associated properties are trademarks or registered trademarks of
@@ -181,7 +209,609 @@ let mode='study', tab='forecast', sel=null;
 const sort = {units:{key:'cost',dir:-1}, items:{key:'category',dir:1}, traits:{key:'name',dir:1}, augments:{key:'rarity',dir:1},
               rankCarry:{key:'theo',dir:-1}, rankComp:{key:'score',dir:-1}};
 // ランキングタブの状態（タブを往復しても選択が戻らないように外に置く）
-let rankView='carry', rankCostBand='';
+let rankView='carry', rankCostBand='', rankRollBand='', rankCompSel=null;
+
+/* ================= 日本語表示 =================
+   ★ 翻訳ではなく「Riot の正規の日本語表記」★
+   Community Dragon の ja_jp から取った名前・説明文を、build_app が
+   英語の隣に *_ja として入れてくる（英語のキーは置き換えない）。
+   英語名を潰さないのは、op.gg の実測・オーグメントの名指し・
+   テスト・構成データ（forecast.units は英語名）が英語名で突き合わせているため。
+   **表示だけを日本語にして、突き合わせは英語名のまま**というのがここの設計。
+
+   入っていない版（古い data.js）では英語のまま出し、件数を画面に出す。
+   黙って英語に戻ると「翻訳が入っている」と誤解されるので、必ず数で出す。 */
+const JA = {unit:{}, trait:{}, item:{}, aug:{}};
+let showEn = false;
+(function(){
+  (T.units||[]).forEach(function(u){ if(u.name_ja) JA.unit[u.name] = u.name_ja; });
+  (T.traits||[]).forEach(function(t){ if(t.name_ja) JA.trait[t.name] = t.name_ja; });
+  (T.items||[]).forEach(function(i){ if(i.name_ja) JA.item[i.name] = i.name_ja; });
+  (T.augments||[]).forEach(function(a){ if(a.name_ja) JA.aug[a.name] = a.name_ja; });
+})();
+function jaCount(kind, total){ return Object.keys(JA[kind]).length + '/' + total; }
+// 英語名 -> 表示名。未収録は英語のまま返す（空欄にはしない）
+function jn(kind, en){ return (en && JA[kind][en]) || en || '—'; }
+const uname = u => (u && (u.name_ja || u.name)) || '—';
+/* select の option は DOM を入れられないので文字列で組む。
+   ★ 既定では英語名を出さない ★ 以前はここだけ常に「アルーン / Alune (c5)」と
+   英語名を併記していて、駒を選ぶ select が5画面にあるため、画面に出ている
+   英単語のうち 74語 × 5 がここから出ていた。
+   英語名で探したい人はヘッダの「英語名も出す」を入れる（入れると併記に戻る）。 */
+function optName(u){
+  return uname(u) + (showEn && uname(u)!==u.name ? ' / '+u.name : '') + '（コスト'+u.cost+'）';
+}
+const unameOf = n => jn('unit', n);
+const tnameOf = n => jn('trait', n);
+const inameOf = n => jn('item', n);
+const anameOf = n => jn('aug', n);
+/* 表示名のノード。「英語名も出す」が入っているときだけ英語を後ろに足す。
+   title にも英語を入れるが、title はスマホで読めないのでそれだけに頼らない
+   （後衛到達の根拠で同じ失敗をしている）。 */
+function nameNode(ja, en){
+  const f = document.createDocumentFragment();
+  f.appendChild(document.createTextNode(ja));
+  if(showEn && en && en !== ja) f.appendChild(el('span','en',' '+en));
+  return f;
+}
+function unitNameNode(u){ return nameNode(uname(u), u.name); }
+/* Python 側が作った文（パッチの変更内容など）に埋まっている英語名を置き換える。
+   ★ 正規表現の総当りにしない ★ 登録済みの名前（JA.unit / JA.trait のキー）だけを
+   **長い名前から順に** 完全一致で差し替える。登録が無い語はそのまま残るので、
+   知らない語が黙って消えることはない。
+   長い順にするのは "Lux (Blackthorn)" が "Lux" と "Blackthorn" を含むため
+   （Set18 の部分一致はこの9件だけ。他はすべて独立した名前）。 */
+let _NAME_KEYS = null;
+const _NAME_ALL = {};
+function localizeNames(text){
+  if(!text) return text;
+  if(!_NAME_KEYS){
+    // アイテム名・オーグメント名も入れる（定数の注記が
+    // 「Silvermere Dawn」「All That Shimmers」を名指しで書いている）。
+    // 短い名前は別の語の一部に当たるので3文字未満は入れない。
+    ['item','aug'].forEach(function(kind){
+      Object.keys(JA[kind]).forEach(function(n){
+        if(n.length >= 3) _NAME_ALL[n] = JA[kind][n];
+      });
+    });
+    // 駒名・トレイト名は従来どおり長さで切らない（Vi のような2文字の駒がいる）
+    ['trait','unit'].forEach(function(kind){
+      Object.keys(JA[kind]).forEach(function(n){ _NAME_ALL[n] = JA[kind][n]; });
+    });
+    _NAME_KEYS = Object.keys(_NAME_ALL).sort(function(a,b){ return b.length - a.length; });
+  }
+  let s = String(text);
+  _NAME_KEYS.forEach(function(k){
+    if(s.indexOf(k) < 0) return;
+    s = s.split(k).join(_NAME_ALL[k]);
+  });
+  return s;
+}
+
+/* 日本語データの取りこぼしを画面に出す。
+   全部そろっているときは畳んだ中に、欠けているときは畳まずに出す
+   （欠けが黙って英語になるのが一番危ない）。 */
+function jaNote(){
+  const J = T.meta && T.meta.ja;
+  const d = el('div','note');
+  if(!J){
+    d.style.color='var(--warn)';
+    d.innerHTML='<b>この data.js には日本語データが入っていない（build_app が古い）。</b>'
+      + '名前と説明は英語のまま出している。'
+      + ' <code>python src/localize.py</code> → <code>python -m src.build_app</code>。';
+    return d;
+  }
+  d.innerHTML = '<b>日本語は Riot の正規表記</b>（日本語版データ <code>'
+    + (J.locale||'ja_jp') + '</code> を <code>' + (J.source||'Community Dragon')
+    + '</code> から取得・機械翻訳ではない）。'
+    + '収録: ユニット ' + jaCount('unit', (T.units||[]).length)
+    + '・トレイト ' + jaCount('trait', (T.traits||[]).length)
+    + '・アイテム ' + jaCount('item', (T.items||[]).length)
+    + '・オーグメント ' + jaCount('aug', (T.augments||[]).length)
+    + '。<b>英語の原文は消していない</b>（各カードの「英語の原文」を開くか、'
+    + 'ヘッダの「英語名も出す」）。';
+  return d;
+}
+function jaIncomplete(){
+  return !(T.meta && T.meta.ja)
+      || Object.keys(JA.unit).length < (T.units||[]).length
+      || Object.keys(JA.trait).length < (T.traits||[]).length;
+}
+/* 日本語と英語でリビジョンが違うオーグメント。
+   Riot の ja_jp が古い（または新しい）版の文面を配っていて、
+   **効果そのものが別物**のものがある（Flame On など）。
+   日本語だけ出すと誤情報になるので、この4件は英語も畳まずに並べる。 */
+function driftNames(){
+  return new Set(((T.meta && T.meta.ja && T.meta.ja.drift_names) || []));
+}
+/* 英語の原文を畳んで置く。原文があるから納得できるものがある（判定根拠など）。 */
+function enOriginal(pairs){
+  const d = el('details','en-orig');
+  d.appendChild(el('summary',null,'英語の原文（Riot の英語表記）'));
+  pairs.forEach(function(p){
+    if(!p[1]) return;
+    const k = el('div','note');
+    k.style.whiteSpace='pre-wrap';
+    k.appendChild(el('b',null,p[0]+': '));
+    k.appendChild(document.createTextNode(p[1]));
+    d.appendChild(k);
+  });
+  return d;
+}
+
+/* ================= 画面から英語を無くす層 =================
+   「英語は必ず日本語にする」への対応。ここが正本。
+
+   ★ 何が英語として残っていたか（2026-09-17 に実ブラウザで数えた）★
+     1. 説明文のテンプレート変数 `@HexRange@` `@AD*100@`
+        … Riot の ja_jp は文だけ配って数値は別の場所（トレイトの段・
+          アイテムの効果）に入っている。埋めないと変数名が画面に残る。
+     2. ステータスのアイコン記号 `%i:scaleAD%`
+     3. 配信データの変数名（CritChance / HexRange …）と種別の値
+        （component / Silver / ADCaster …）
+     4. select の選択肢に英語名を併記していたこと
+     5. Python が組み立てた説明文の中の駒名・トレイト名・略号
+
+   ★ 方針 ★
+     ・見えている文章は日本語だけにする。
+     ・英語の原文と配信データの生の値は **消さずに畳む**（.en-orig / .en）。
+       原文があるから納得できるものがある（後衛到達の判定根拠など）。
+     ・登録に無い語は **黙って消さない**。そのまま出して件数を画面に出す。 */
+
+/* ---- 配信データの変数名を日本語にする ----
+   ★ 総当りの正規表現にしない ★ 語を1つずつ登録する。登録に無い語が出たら
+   その変数名はそのまま画面に残し、「未登録」として数える。
+   新しいパッチで変数が増えたときに黙って消えないようにするため。 */
+const TOKEN_JA = {
+  AD:'攻撃力', AP:'魔力', ADAP:'攻撃力/魔力', AS:'攻撃速度',
+  Attack:'攻撃', Speed:'速度', Aspd:'攻撃速度', Attacks:'攻撃',
+  Ability:'スキル', Power:'力', AbilityPower:'魔力',
+  Armor:'物理防御', MR:'魔法防御', MagicResist:'魔法防御',
+  Magic:'魔法', Resist:'防御', Resists:'耐性', Physical:'物理',
+  Health:'体力', HP:'体力', Mana:'マナ', Regen:'自動回復',
+  Crit:'クリティカル', Chance:'率', Damage:'ダメージ', True:'確定',
+  Durability:'耐久', Omnivamp:'オムニヴァンプ', Shield:'シールド',
+  Heal:'回復', Wound:'回復低下', Shred:'魔法防御低下', Sunder:'物理防御低下',
+  Burn:'燃焼', Bleed:'出血', Stun:'スタン',
+  Bonus:'ボーナス', Base:'基本', Max:'最大', Min:'最小', Flat:'固定値',
+  Total:'合計', Percent:'割合', Pcnt:'割合', Ratio:'割合', Mult:'倍率',
+  Multiplier:'倍率', Amp:'増幅', Gain:'獲得量', Increase:'上昇量',
+  Increased:'上昇', Per:'あたり', Threshold:'しきい値', Cap:'上限',
+  Value:'値', Amount:'量', Num:'数', Count:'数', Extra:'追加',
+  Additional:'追加', Instant:'即時', Initial:'初期', Starting:'開始時',
+  Start:'開始', Combat:'戦闘', Combats:'戦闘', Current:'現在',
+  Scalar:'係数', Stacks:'スタック', Stack:'スタック', Proc:'発動',
+  Duration:'持続時間', Delay:'遅延', Seconds:'秒', Period:'間隔',
+  Cooldown:'再使用時間', Interval:'間隔', Time:'時間', ICD:'再発動待ち',
+  Gold:'ゴールド', XP:'経験値', Reroll:'リロール', Rerolls:'リロール',
+  Champ:'チャンピオン', Champion:'チャンピオン', Cost:'コスト',
+  Level:'レベル', Star:'★', One:'1', Two:'2', Three:'3',
+  Item:'アイテム', Items:'アイテム', Component:'素材', Components:'素材',
+  Anvil:'アンヴィル', Anvils:'アンヴィル', Glove:'グローブ', Gloves:'グローブ',
+  Orb:'オーブ', Orbs:'オーブ', Round:'ラウンド', Rounds:'ラウンド',
+  Stage:'ステージ', Turns:'ターン', Interest:'利子', Loan:'前借り',
+  Team:'チーム', Teamwide:'チーム全体', Wide:'全体', Size:'数',
+  Slot:'枠', Slots:'枠', Hex:'マス', Hexes:'マス', Range:'範囲',
+  Board:'盤面', Ally:'味方', Allies:'味方', Enemy:'敵', Enemies:'敵',
+  Unit:'ユニット', Units:'ユニット', Trait:'トレイト', Traits:'トレイト',
+  Emblem:'エンブレム', Augment:'オーグメント', Lucky:'幸運',
+  Up:'アップ', To:'まで', For:'用', Of:'の', And:'と', The:'',
+  On:'時', Not:'非', Bar:'バー', Stat:'ステータス', StatBar:'表示',
+  Monster:'モンスター', Sprite:'精霊', Seed:'種', Seeds:'種',
+  Plant:'植物', Tree:'樹', Grow:'成長', Cast:'詠唱', Casts:'詠唱',
+  Essence:'エッセンス', Death:'死亡', Deaths:'死亡', Loss:'敗北',
+  Win:'勝利', Charm:'チャーム', Purchased:'購入', Purchase:'購入',
+  Capstone:'最終段', Unique:'固有', Tooltip:'説明', Key:'識別子',
+  Conversion:'変換', Overrun:'継続', Required:'必要', Req:'必要',
+  Front:'前衛', Liner:'列', FrontLiner:'前衛', Old:'旧', New:'新',
+  Guaranteed:'確定', Beam:'ビーム', Ritual:'儀式',
+  From:'から', With:'付き', Without:'なし', Fielding:'配置',
+  Grievouswounds:'回復低下', Defense:'防御', Non:'非', Second:'2回目',
+  Stonebark:'ストーンバーク', ASperAttack:'攻撃ごとの攻撃速度', Sper:'ごとの',
+  Reduction:'軽減', Tick:'刻み', Ticks:'刻み', Rate:'率',
+  Aoe:'範囲攻撃', Missing:'不足', Healing:'回復', Grant:'付与',
+  Steal:'奪取', Restore:'回復', Trigger:'発動', Perc:'割合',
+  Empowered:'強化', Empower:'強化', Buff:'強化', Stacking:'積み上げ',
+  Aegis:'イージス', Takedown:'討伐', Takedowns:'討伐', Slow:'減速',
+  Freeze:'凍結', Clone:'分身', Splash:'拡散', Store:'蓄積',
+  Backline:'後衛', Frontline:'前衛', Life:'ライフ', Modified:'補正',
+  Auto:'通常攻撃', Stealth:'隠密', Ar:'物理防御', Break:'破壊',
+  Hit:'命中', Spell:'スキル', Army:'盤面', Timer:'時間',
+  Number:'数', Player:'プレイヤー', Reward:'報酬', Plus:'プラス',
+  Breakpoint:'発動段', Champs:'チャンピオン', Effectiveness:'効果量',
+  Upfront:'先払い', Unlock:'解放', Rolls:'リロール', Now:'即時',
+  Wait:'待機', Silver:'シルバー', Zap:'放電', Basic:'基本',
+  First:'最初', Activation:'発動', Frequency:'頻度',
+  Upgraded:'強化後', Upgrade:'強化', Gen:'生成', Inc:'増加',
+  Survive:'生存', In:'内', Add:'追加', Bench:'控え',
+  Enhanced:'強化', Loot:'戦利品', No:'なし', Doesnt:'しない',
+  Lossxp:'敗北時経験値', Winxp:'勝利時経験値', Xp:'経験値',
+  Dmg:'ダメージ', Pct:'割合', Var:'変数', Tra:'内部',
+  Scale:'係数', Scaling:'係数', Calc:'計算値', Pen:'貫通',
+  Bind:'装備固定', Equip:'装備', Dr:'ダメージ軽減',
+  Sec:'秒', Secs:'秒', Ms:'ミリ秒', Frac:'割合',
+  Radius:'半径', Targets:'対象', Target:'対象', Nearby:'周囲',
+  Cone:'扇', Line:'直線', Wave:'波', Bolt:'弾', Missile:'弾',
+  Summon:'召喚', Summons:'召喚', Minion:'召喚物', Pet:'召喚物',
+  Rival:'ライバル', Rivals:'ライバル',
+};
+// 変数名に混ざる駒名・トレイト名は JA.unit / JA.trait を使う（ここに二重に書かない）
+const TERM_NAMES = {};
+(function(){
+  Object.keys(JA.unit).forEach(function(n){ TERM_NAMES[n.replace(/[^A-Za-z]/g,'')] = JA.unit[n]; });
+  Object.keys(JA.trait).forEach(function(n){ TERM_NAMES[n.replace(/[^A-Za-z]/g,'')] = JA.trait[n]; });
+})();
+// 頭字語が CamelCase の切り方と噛み合わないものを先にならす（AoE が Ao/E に割れる）
+function normalizeTermKey(k){
+  return String(k).replace(/AoE/g,'Aoe').replace(/GrievousWounds/g,'Grievouswounds');
+}
+function splitTermTokens(key){
+  const parts = normalizeTermKey(key).split(/[_.\s]+/).filter(Boolean);
+  const out = [];
+  parts.forEach(function(p){
+    const m = p.match(/[A-Z]+(?![a-z])|[A-Z][a-z]+|[a-z]+|[0-9]+(?:\.[0-9]+)?/g) || [p];
+    m.forEach(function(x){ out.push(x); });
+  });
+  return out;
+}
+const TERM_MISS = {};   // 未登録の語。画面に件数を出すために数える
+function termJa(key){
+  if(key == null) return {text:String(key), ok:false};
+  const direct = TERM_NAMES[key] || TOKEN_JA[key];
+  if(direct) return {text:direct, ok:true};
+  const toks = splitTermTokens(key);
+  if(!toks.length) return {text:String(key), ok:false};
+  let ok = true;
+  const words = toks.map(function(t){
+    if(/^[0-9.]+$/.test(t)) return t;
+    const cap = t.charAt(0).toUpperCase() + t.slice(1);
+    const hit = TERM_NAMES[t] || TERM_NAMES[cap] || TOKEN_JA[t] || TOKEN_JA[cap];
+    if(hit == null){ ok = false; TERM_MISS[t] = (TERM_MISS[t]||0)+1; return t; }
+    return hit;
+  });
+  return {text:words.join(''), ok:ok};
+}
+function termLabel(key){ return termJa(key).text; }
+
+/* ---- ステータスのアイコン記号 ---- */
+const STAT_ICON_JA = {
+  scaleAD:'攻撃力', scaleAP:'魔力', scaleAS:'攻撃速度', scaleArmor:'物理防御',
+  scaleMR:'魔法防御', scaleHealth:'体力', scaleMana:'マナ',
+  scaleManaRegen:'マナ自動回復', TFTManaRegen:'マナ自動回復',
+  scaleDR:'ダメージ軽減', scaleDA:'ダメージ増幅', goldCoins:'ゴールド',
+  scaleCrit:'クリティカル率', scaleOmnivamp:'オムニヴァンプ',
+};
+const ICON_MISS = {};
+function fillStatIcons(s){
+  return String(s).replace(/%i:([A-Za-z0-9_]+)%/g, function(m, k, off, whole){
+    const ja = STAT_ICON_JA[k];
+    if(!ja){ ICON_MISS[k] = (ICON_MISS[k]||0)+1; return ''; }
+    // 直前に同じ語があるなら重ねない（「攻撃力%i:scaleAD%」→「攻撃力」）
+    return whole.slice(Math.max(0, off - ja.length), off) === ja ? '' : ja;
+  });
+}
+
+/* ---- 説明文の @変数@ に実数を埋める ----
+   Riot の ja_jp / en_us はどちらもテンプレートのまま配られていて、
+   数値は別の場所に入っている（アイテム=effects / トレイト=tiers[].variables）。
+   ★ 埋められなかったものは「？」にして件数を出す ★
+   変数名をそのまま出すと英語が残り、黙って消すと数字があるように見える。
+   どちらも駄目なので「ここは数値が配信されていない」と分かる形にする。 */
+function resolveVar(expr, vars){
+  const m = /^([A-Za-z0-9_.'’-]+)(?:\s*([*/])\s*([0-9.]+))?$/.exec(expr);
+  if(!m) return null;
+  const key = m[1].toLowerCase();
+  if(!(key in vars)) return null;
+  let v = vars[key];
+  if(typeof v !== 'number') return String(v);
+  if(m[2]==='*') v = v * parseFloat(m[3]);
+  else if(m[2]==='/') v = v / parseFloat(m[3]);
+  return String(Math.round(v*100)/100);
+}
+/* Riot の説明文に残っている装飾マークアップを落とす。
+   `{{TFT_Keyword_Precision}}` はキーワードの見出しへの参照で、
+   直前の日本語の文（「正確無比を獲得する。」）が同じことを書いている。
+   `&nbsp;` は実体参照がそのまま文字列で入っているもの。
+   どちらも文章ではなく印なので落とす（落とした件数は数える）。 */
+const MARKUP_STRIPPED = {};
+function stripMarkup(s){
+  return String(s)
+    .replace(/\{\{([^{}]{0,80})\}\}/g, function(m, k){
+      MARKUP_STRIPPED[k] = (MARKUP_STRIPPED[k]||0)+1; return ''; })
+    .replace(/&nbsp;/g, ' ');
+}
+function fillVars(text, vars){
+  const missing = [];
+  const out = String(text == null ? '' : text).replace(/@([^@\n]{1,80})@/g, function(m, expr){
+    const t = resolveVar(expr, vars || {});
+    if(t === null){ missing.push(expr); return '？'; }
+    return t;
+  });
+  return {text: stripMarkup(fillStatIcons(out)), missing: missing};
+}
+function lowerKeys(o){
+  const v = {};
+  Object.keys(o||{}).forEach(function(k){ v[k.toLowerCase()] = o[k]; });
+  return v;
+}
+function itemVars(i){ return lowerKeys(i && i.effects); }
+function augVars(a){ return lowerKeys(a && a.effects); }
+/* トレイトは段ごとに数値が違う。説明文の中の `(@MinUnits@)` が段の区切りなので、
+   k番目の区切りから先は tiers[k] の数値で埋める。
+   区切りの数と段の数が合わないときは全段をまとめて渡す。 */
+function fillIntroVars(text, tiers){
+  return String(text||'').replace(/@([^@\n]{1,80})@/g, function(m, expr){
+    const vals = [];
+    let ok = true;
+    tiers.forEach(function(ti){
+      const vars = lowerKeys(ti.variables);
+      vars['minunits'] = ti.minUnits;
+      const v = resolveVar(expr, vars);
+      if(v === null) ok = false; else if(vals.indexOf(v) < 0) vals.push(v);
+    });
+    if(!ok || !vals.length) return m;   // 解けないものは触らない（下の段で '？' になる）
+    return vals.join('/');
+  });
+}
+function traitDescFilled(t){
+  const tiers = t.tiers || [];
+  const raw = t.desc_ja || t.desc || '';
+  const marks = raw.split('(@MinUnits@)');
+  if(marks.length - 1 === tiers.length && tiers.length){
+    /* ★ 段より前の導入文にも変数が入っている ★
+       「最大体力の@BonusHealth*100@%を獲得する」のように、段ごとに値が変わる
+       変数が導入文に置かれているトレイトが13件ある。段の数値で埋めないと
+       変数名がそのまま画面に残る。どの段の値かは決まらないので、
+       段ごとの値を「12/30/45」のように並べて出す（下の段の表と一致する）。 */
+    const intro = fillVars(fillIntroVars(marks[0], tiers), {});
+    let out = intro.text, missing = intro.missing.slice();
+    for(let k=0; k<tiers.length; k++){
+      const vars = lowerKeys(tiers[k].variables);
+      vars['minunits'] = tiers[k].minUnits;
+      const r = fillVars('(@MinUnits@)' + marks[k+1], vars);
+      out += r.text; missing = missing.concat(r.missing);
+    }
+    return {text: out, missing: missing};
+  }
+  const all = {};
+  tiers.forEach(function(x){ Object.assign(all, lowerKeys(x.variables)); });
+  if(tiers.length) all['minunits'] = tiers[0].minUnits;
+  return fillVars(raw, all);
+}
+/* 説明文の DOM。日本語の本文＋（埋まらなかった箇所があればその件数）。
+   英語の原文は呼ぶ側が enOriginal で畳んで置く。 */
+function descNode(filled, cls){
+  const d = el('div', cls || 'abil');
+  d.appendChild(document.createTextNode(filled.text || '—'));
+  if(filled.missing && filled.missing.length){
+    const n = el('div','note');
+    n.appendChild(document.createTextNode(
+      '※ 数値が配信されていない箇所が ' + filled.missing.length + ' か所（「？」で表示）。'
+      + '元の変数名は「英語の原文」に残してある。'));
+    d.appendChild(n);
+  }
+  return d;
+}
+/* 表のセルに入れる短い版（件数の注記を1行に畳む） */
+function descSpan(filled){
+  const d = el('span');
+  d.appendChild(document.createTextNode(filled.text || '—'));
+  if(filled.missing && filled.missing.length)
+    d.appendChild(el('span','dim','　※数値なし '+filled.missing.length+'か所'));
+  return d;
+}
+/* 配信データの生の値（英語の変数名）を畳んで置く枠。消さずに残すための場所。 */
+function rawValues(title, pairs){
+  if(!pairs || !pairs.length) return null;
+  const d = el('details','en-orig');
+  d.appendChild(el('summary',null, title + '（配信データの英語表記・'+pairs.length+'件）'));
+  const k = el('div','note');
+  k.textContent = pairs.join('  ');
+  d.appendChild(k);
+  return d;
+}
+
+/* ---- 種別・レアリティ・ロールの日本語 ---- */
+const ITEM_CATEGORY_JA = {
+  component:'素材', completed:'完成品', radiant:'光輝', artifact:'アーティファクト',
+  emblem:'エンブレム', support:'支援', consumable:'消費アイテム',
+};
+const RARITY_JA = {Silver:'シルバー', Gold:'ゴールド', Prismatic:'プリズマ'};
+function rarityJa(r){ return r ? (RARITY_JA[r] || r) : '不明'; }
+function categoryJa(c){ return c ? (ITEM_CATEGORY_JA[c] || c) : '—'; }
+/* op.gg のロール名。頭の AD / AP は参照ステータス、後ろが役割。 */
+const ROLE_TAIL_JA = {
+  Carry:'キャリー', Caster:'キャスター', Fighter:'ファイター', Reaper:'リーパー',
+  Specialist:'スペシャリスト', Tank:'タンク',
+};
+function roleJa(r){
+  if(!r) return '不明';
+  const m = /^(AD|AP)(.+)$/.exec(r);
+  if(m && ROLE_TAIL_JA[m[2]]) return (m[1]==='AD'?'攻撃力':'魔力') + '型' + ROLE_TAIL_JA[m[2]];
+  return ROLE_TAIL_JA[r] || r;
+}
+const SCALE_JA = {AD:'攻撃力', AP:'魔力', HP:'体力', scaleDA:'ダメージ増幅'};
+function scaleJa(x){ return SCALE_JA[x] || x; }
+/* 素材の apiName は完成品側と別系統（DA_Component_… と TFT_Item_…）。
+   ★ 明示レジストリ ★ 接頭辞の付け替えで当てにいくと、新しい命名で黙って外れる。 */
+const COMPONENT_ALIAS = {
+  DA_Component_BFSword:'TFT_Item_BFSword',
+  DA_Component_ChainVest:'TFT_Item_ChainVest',
+  DA_Component_FryingPan:'TFT_Item_FryingPan',
+  DA_Component_GiantsBelt:'TFT_Item_GiantsBelt',
+  DA_Component_NeedlesslyLargeRod:'TFT_Item_NeedlesslyLargeRod',
+  DA_Component_NegatronCloak:'TFT_Item_NegatronCloak',
+  DA_Component_RecurveBow:'TFT_Item_RecurveBow',
+  DA_Component_SparringGloves:'TFT_Item_SparringGloves',
+  DA_Component_Spatula:'TFT_Item_Spatula',
+  DA_Component_TearOfTheGoddess:'TFT_Item_TearOfTheGoddess',
+};
+const ITEM_BY_API = {};
+(T.items||[]).forEach(function(i){ ITEM_BY_API[i.apiName] = i; });
+function itemByApi(api){
+  return ITEM_BY_API[api] || ITEM_BY_API[COMPONENT_ALIAS[api]] || null;
+}
+function itemNameByApi(api){
+  const it = itemByApi(api);
+  return it ? (it.name_ja || it.name)
+            : termLabel(String(api).replace(/^(DA|TFT[0-9]*)_(Item|Component)_/,''));
+}
+
+/* ---- 定数タブの日本語名 ----
+   ★ 明示レジストリ ★ 定数が増えたら未登録として英語のまま出る（黙って消えない）。 */
+const CONST_JA = {
+  AS_CAP:'攻撃速度の上限', AS_FLOOR:'攻撃速度の下限',
+  BOARD_COLS:'盤面の列数', BOARD_ROWS:'自陣の行数', BOARD_HEXES:'自陣のマス数',
+  FULL_ROWS:'戦闘時の行数', FIGHT_DURATION:'評価に使う戦闘時間',
+  HEX_MOVE_SECONDS:'1マス移動にかかる秒数',
+  HP_PERCENT_ON_TOTAL:'割合体力を実数加算の後に掛けるか',
+  INTEREST_CAP:'利子の上限', INTEREST_PER:'利子が1増えるゴールド',
+  MANA_LOCK_SECONDS:'詠唱直後にマナを得られない時間',
+  MANA_PER_AUTO:'通常攻撃1回で得るマナ',
+  MANA_PER_DAMAGE_TAKEN:'被ダメージ1あたりに得るマナ',
+  POOL_SIZE_PER_UNIT:'1種あたりのプール枚数',
+  REROLL_COST:'リロール1回の費用', RESIST_K:'防御の軽減式の定数',
+  SHOP_ODDS:'ショップの出現率表',
+  STAR_AD_MULT:'星が1つ上がるときの攻撃力倍率',
+  STAR_HP_MULT:'星が1つ上がるときの体力倍率',
+  STAR_SCALES_RESISTS:'星で耐性も伸びるか',
+  STREAK_BONUS:'連勝・連敗ボーナス',
+  UNITS_FOR_2_STAR:'★2に必要な枚数', UNITS_FOR_3_STAR:'★3に必要な枚数',
+  XP_BUY_AMOUNT:'1回の購入で得る経験値', XP_BUY_COST:'経験値購入の費用',
+  XP_TO_NEXT_LEVEL:'次のレベルまでの経験値',
+};
+const CONST_UNIT_JA = {gold:'ゴールド', XP:'経験値'};
+
+/* ---- Python が組み立てた説明文の日本語化 ----
+   駒名・トレイト名・アイテム名・オーグメント名（localizeNames）に加えて、
+   略号と配信データの変数名を差し替える。
+   ★ 語の一覧はデータから作る ★ 手で二重に書くとパッチでずれる。 */
+const PHRASE_JA = [
+  ['econ18 shop_odds','ショップ出現率表'], ['shop_odds','出現率表'],
+  ['LoL 公式 Wiki','リーグ・オブ・レジェンドの公式ウィキ'],
+  ['LoL','リーグ・オブ・レジェンド'], ['Wiki','ウィキ'],
+  ['Top4','上位4位'], ['BiS','理論最適'],
+  ['Scouting','相手盤面の自動読み取り'],
+  ['Shield','耐久値'], ['Heal','回復量'],
+  ['True','真'], ['False','偽'],
+  // op.gg のロール名（定数の注記に生で出てくる）
+  ['Carry','キャリー'], ['Fighter','ファイター'], ['Reaper','リーパー'],
+  ['Caster','キャスター'], ['Tank','タンク'], ['Specialist','スペシャリスト'],
+  // 定数の注記に生で出てくる語（アイテム名の略称・セット番号・単位）
+  ['Guinsoo','グインソー'], ['Set18','セット18'], ['gold','ゴールド'],
+  // 召喚物の名前。駒でもアイテムでもないのでどの名前表にも入っていない
+  ['Stonebark Tree','ストーンバークの木'],
+  ['Lv','レベル'],
+];
+/* ---- コードの識別子 ----
+   ★ 明示レジストリ ★ 開発者向けの注記（定数タブなど）には、ファイル名・
+   関数名・データ項目名がそのまま書いてある。これは文章ではなく識別子なので
+   翻訳せず <code> に落として「コード」だと分かる形にする。
+   ここに無い識別子は普通の文字として残るので、走査で見えるままになる。 */
+const CODE_TERMS = [
+  'src/engine/comps.py','src/engine/traits.py','src/engine/combat.py',
+  'src/engine/econ.py','src/engine/board.py','src/engine/backline.py',
+  'src/engine/rolllevel.py','src/engine/augments.py',
+  'src/calibrate.py','src/calibrate_mana.py','calibrate.py','calibrate_mana.py',
+  'combat.py','opgg.py','econ.py','traits.py','comps.py','board.py','build_app',
+  'SCALE_MAP','casts_in_fight','FIGHT_DURATION','AttackSpeedCap',
+  'HexToRangeMap','TierBags','DropRateTables.Shop','TFTStreakData',
+  'desc_raw','VARS','verified','data.js','map22','ItemTags',
+  'MutuallyExclusiveItems','econ18.json','econ18','econ.json','shop_odds',
+  'game/data/maps/shipping/map22/map22.bin.json','map22.bin.json',
+  'data/build/calibration18.json','data/build/econ18.json','data/build/opgg18.json',
+  'total_damage','_suspect_star','previous','rows','flat','cost','ap','ad',
+];
+/* 識別子を <code> にしたノード（innerHTML を使うので中身は必ずエスケープする）。 */
+function escHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+let _CODE_RE = null;
+function codeRe(){
+  if(_CODE_RE !== null) return _CODE_RE;
+  // 長いものから当てる。1回の走査で済ませないと <code> の中をもう一度包んでしまう
+  const list = CODE_TERMS.slice().sort(function(a,b){ return b.length - a.length; })
+    .map(function(k){ return k.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&'); });
+  // Riot のハッシュ（{8桁の16進数}）も識別子として扱う。訳語が存在しない
+  // ★ 後読み (?<!...) を使わないこと ★
+  // iOS Safari 16.4 未満は後読み未対応で、**new RegExp が SyntaxError を投げる**。
+  // codeRe() は描画の入口で呼ばれるので、古い iPhone ではアプリ全体が起動しない。
+  // 代わりに「直前の1文字も一緒に捕まえて、置換時に書き戻す」形にする（ES3 から動く）。
+  // 第1群 = 直前の1文字（識別子の続きでないこと）、第2群 = 識別子本体。
+  _CODE_RE = new RegExp('(^|[^A-Za-z0-9_])(\\{[0-9a-f]{8}\\}|(?:' + list.join('|')
+    + '))(?![A-Za-z0-9_])', 'g');
+  return _CODE_RE;
+}
+function devNote(text, cls){
+  const d = el('div', cls || 'note');
+  const re = codeRe(); re.lastIndex = 0;
+  // 第1群（直前の1文字）はそのまま戻し、第2群だけ <code> に包む。
+  d.innerHTML = escHtml(jp(text||'')).replace(re, function(m, pre, id){
+    return pre + '<code>' + id + '</code>'; });
+  return d;
+}
+/* 識別子を <code> にした HTML 文字列。innerHTML に差し込む側が使う。 */
+function devHtml(text){
+  const re = codeRe(); re.lastIndex = 0;
+  return escHtml(jp(text||'')).replace(re, function(m, pre, id){
+    return pre + '<code>' + id + '</code>'; });
+}
+function devSpan(text){
+  const d = el('span');
+  const re = codeRe(); re.lastIndex = 0;
+  d.innerHTML = escHtml(jp(text||'')).replace(re, function(m){ return '<code>'+m+'</code>'; });
+  return d;
+}
+let _VAR_RE = null;
+function varPattern(){
+  if(_VAR_RE !== null) return _VAR_RE;
+  const keys = {};
+  (T.traits||[]).forEach(function(t){ (t.tiers||[]).forEach(function(x){
+    Object.keys(x.variables||{}).forEach(function(k){ keys[k]=1; }); }); });
+  (T.items||[]).forEach(function(i){ Object.keys(i.effects||{}).forEach(function(k){ keys[k]=1; }); });
+  (T.augments||[]).forEach(function(a){ Object.keys(a.effects||{}).forEach(function(k){ keys[k]=1; }); });
+  const list = Object.keys(keys).filter(function(k){ return /^[A-Za-z][A-Za-z0-9_]+$/.test(k); })
+    .sort(function(a,b){ return b.length - a.length; });
+  _VAR_RE = list.length
+    ? new RegExp('(^|[^A-Za-z])(' + list.join('|') + ')(?![A-Za-z])', 'g')
+    : false;
+  return _VAR_RE;
+}
+function localizeTerms(text){
+  if(!text) return text;
+  let s = String(text);
+  const re = varPattern();
+  if(re){ re.lastIndex = 0; s = s.replace(re, function(m, pre, key){ return pre + termLabel(key); }); }
+  PHRASE_JA.forEach(function(p){ if(s.indexOf(p[0])>=0) s = s.split(p[0]).join(p[1]); });
+  return s;
+}
+/* Python 由来の文（構成の理由・トレイト補正の内訳・定数の注記など）はこれを通す。
+   ★ 英語の原文（backline の evidence など）には通さない ★ あれは原文として出す枠。
+
+   ★ 順番が大事 ★ 先に localizeNames を掛けると、変数名の中の駒名が置き換わって
+   （BrawlerTeamHealth → ブローラーTeamHealth）変数名として引けなくなる。
+   実際そうなっていて「ブローラーTeam回復量th=120」という文字列が画面に出ていた。
+   変数名をまるごと解決してから、残った単独の名前を置き換える。 */
+function jp(text){ return localizeNames(localizeTerms(text)); }
+
+/* ================= 前提を畳む =================
+   「文字が多すぎる」への対応。**消さない**。
+   summary に要約を出しておくので、畳んでいても前提の存在は見える。
+   赤い警告（実測が古い等）はここに入れない ── あれは畳まない。 */
+function premise(summary, nodes){
+  const d = el('details','premise');
+  d.appendChild(el('summary',null,'前提と注記を見る　— '+summary));
+  const b = el('div','body');
+  nodes.filter(Boolean).forEach(function(n){ b.appendChild(n); });
+  d.appendChild(b);
+  return d;
+}
+function noteHTML(html, color){
+  const n = el('div','note');
+  n.innerHTML = html;
+  if(color) n.style.color = color;
+  return n;
+}
 
 /* ---------- header ---------- */
 $('#setmeta').textContent =
@@ -224,7 +854,10 @@ $('#banner').innerHTML = cov > 0.5
 // 対戦中に出してよいのは**試合前から手元にある静的データ**だけで、
 // 相手の盤面を自動で読むこと（Scouting）はしない（docs/03 §5）。
 const TAB_SETS = {
-  study: [['forecast','先に使う構成'],['rank','ランキング'],['carry','キャリー逆引き'],['front','前衛（壁）'],
+  // ★「キャリー逆引き」をやめた ★
+  // 前衛を軸にしても引けるようにしたので、名前がキャリー前提のままだと嘘になる。
+  // 中のキー（'carry'）は他のタブからの遷移で使っているのでそのまま。
+  study: [['forecast','先に使う構成'],['rank','ランキング'],['carry','キャラから構成'],['front','前衛（壁）'],
           ['board','配置'],['econ','リロール確率'],['units','ユニット'],
           ['traits','トレイト'],['items','アイテム'],['augments','オーグメント'],
           ['constants','定数の検証状態']],
@@ -254,6 +887,7 @@ document.querySelectorAll('.modes button').forEach(b=>{
     document.querySelectorAll('.modes button').forEach(x=>x.classList.toggle('on',x===b));
     buildTabs(true); render();};
 });
+$('#showen').onchange = function(){ showEn = this.checked; render(); };
 
 /* ---------- helpers ---------- */
 function costChip(c){ const s=el('span','cost c'+c,c); return s; }
@@ -274,6 +908,186 @@ function gd(r){
            : {floor:null, all_2star:Infinity, missing:true};
 }
 
+/* ---------- 何レベルでロールする型か ----------
+   src/engine/rolllevel.py の analyze() の結果が forecast.rows[].roll に入る。
+   ここで再判定はしない（2箇所に規則を書くと必ずずれる）。
+
+   ★ roll_level（何レベルで回すか）と board_level（何体出すか）は別物 ★
+   ランキングの構成は全部8体なので board_level は常に8。
+   「Lv6型なのに8体いる」は矛盾ではないので、両方出して区別できるようにする。
+
+   ★ roll_level が null のときは 8 などに丸めない ★
+   「判定できない」とそのまま出す。丸めると嘘を自信満々に出すことになる。 */
+function rollOf(r){ return (r && r.roll) || null; }
+function rollBadge(R, big){
+  if(!R){
+    const s = el('span','roll unknown','型データなし');
+    s.title = 'この行に roll が入っていない（data.js が古い）。'
+            + 'python -m src.build_app で再生成する';
+    return s;
+  }
+  const lv = R.roll_level;
+  // label は Python が組み立てた「Lv7 リロール」。Lv を日本語にしてから出す
+  const s = el('span','roll '+(lv ? 'lv'+lv : 'unknown'), jp(R.label) || '判定できない');
+  if(!big) s.classList.add('rollmini');
+  const bits = [];
+  if(R.summary) bits.push(jp(R.summary));
+  if(!R.decided && (R.also||[]).length)
+    bits.push('どちらとも言える（もう一方の候補: レベル'+R.also.join(' / レベル')+'）');
+  bits.push('盤面に出すのに要るレベル: レベル'+R.board_level+'（回すレベルとは別）');
+  s.title = bits.join('\n');
+  if(!R.decided){
+    const q = el('span','badge warn','?');
+    q.title = 'どちらとも言える';
+    s.appendChild(q);
+  }
+  return s;
+}
+/* コストの分布。「Lv8 ならコスト4が何体いるのか」を一目で出す。 */
+function costDist(R){
+  const w = el('span','dist');
+  if(!R || !R.cost_counts) { w.appendChild(el('span','dim','—')); return w; }
+  [1,2,3,4,5].forEach(function(c){
+    const n = R.cost_counts[String(c)] != null ? R.cost_counts[String(c)] : R.cost_counts[c];
+    if(!n) return;
+    w.appendChild(costChip(c));
+    w.appendChild(el('span','n','×'+n));
+  });
+  return w;
+}
+/* ★3の到達率。構成ごとには変わらない（主役のコストとレベルだけで決まる）ので、
+   その断りを必ず添える。添えないと「この構成の数字」に見える。 */
+function threeStarCell(R){
+  if(!R || !R.three_star) return el('span','dim','—');
+  const t = R.three_star;
+  const cls = t.verdict==='feasible' ? 'ok' : (t.verdict==='lucky' ? 'warn' : 'bad');
+  const s = el('span','badge '+cls, Math.round(t.p_3star*1000)/10+'%');
+  s.title = jp(t.why) + '\n' + jp(R.three_star_note||'');
+  return s;
+}
+/* ロール型の前提は構成ごとには持っていない（同じ値なので）。
+   呼ぶ側が1回だけ上位に出す約束になっている（rolllevel.ASSUMPTIONS）。
+   ★ 未検証の前提を画面に出すのはこのツールの方針。畳むのは可、消すのは不可。 */
+function rollAssumptionsNote(){
+  const A = (T.meta && T.meta.roll_assumptions) || [];
+  const d = el('div','note');
+  if(!A.length){
+    d.innerHTML = '<b>ロール型の前提が data.js に入っていない。</b>'
+      + '★3到達率が何を仮定した数字なのか画面から確かめられない状態。'
+      + ' <code>python -m src.build_app</code> で再生成する。';
+    d.style.color='var(--warn)';
+    return d;
+  }
+  const bad = A.filter(function(x){ return !x.verified; }).length;
+  let h = '<b>★3到達率とロール型の前提（' + bad + '/' + A.length + ' が未検証）</b><br>';
+  h += A.map(function(x){
+    // 前提の名前は Python 側の定数名。日本語名があればそれを出す
+    return '・<b>' + (CONST_JA[x.name] || termLabel(x.name)) + ' = ' + x.value
+      + (CONST_UNIT_JA[x.unit] || x.unit || '') + '</b>'
+      + (x.verified ? '（検証済）' : '<span class="wtxt">（未検証）</span>') + ' ' + jp(x.why);
+  }).join('<br>');
+  h += '<br>予算が変わると結論が変わる（50ゴールドなら全コストで★3は 0〜0.2%、'
+     + '200ゴールドなら低コストは 83〜97%）。各構成の「★3」を押すと'
+     + ' 50/100/150/200 ゴールドの曲線が出る。';
+  d.innerHTML = h;
+  return d;
+}
+
+/* アイテムが何個要るか（F: ソラカ・フィドルは無料の部品ではない）。 */
+function itemNeedCell(R){
+  const it = R && R.items;
+  if(!it) return el('span','dim','—');
+  const s = el('span','badge '+(it.over_subscribed?'bad':'ok'), it.must_count+' 人');
+  s.title = jp(it.why||'') + '\n1ゲームで組める完成アイテムは '
+          + it.builds_available + ' 組（未検証）';
+  return s;
+}
+
+/* ---------- 構成カードの「型」区画 ----------
+   D（何レベルロールか）・F（アイテムが何個要るか）・C（★3が現実的か）をまとめて出す。
+   ★ tension（矛盾・信用できない点）は必ず出す ★
+   ソルバーの構成は「Lv6型なのに主役より高いコスト帯が5体いる」ことがある。
+   これはエンジン側が承知で出している矛盾で、隠すと型の表示だけが独り歩きする。 */
+function rollBlock(r){
+  const R = rollOf(r);
+  const box = el('div');
+  box.style.cssText='border:1px solid var(--line);border-radius:6px;padding:9px;margin:8px 0';
+  if(!R){
+    box.appendChild(noteHTML('<b>この構成の「何レベルで回す型か」が入っていない</b>'
+      + '（data.js が古い）。<code>python -m src.build_app</code> で再生成する。', 'var(--warn)'));
+    return box;
+  }
+  const line = el('div');
+  line.style.cssText='display:flex;flex-wrap:wrap;gap:10px;align-items:center';
+  line.appendChild(rollBadge(R, true));
+  if(R.summary) line.appendChild(el('span','dim', jp(R.summary)));
+  line.appendChild(el('span','dim',
+    '盤面 レベル'+R.board_level+'（'+R.board_level+'体出す）'));
+  box.appendChild(line);
+
+  const grid = el('div');
+  grid.style.cssText='display:flex;flex-wrap:wrap;gap:16px;margin-top:8px;align-items:center';
+  function cell(label, node){
+    const d=el('div'); d.style.cssText='display:flex;flex-direction:column;gap:2px';
+    d.appendChild(el('span','dim',label)); d.appendChild(node); return d;
+  }
+  grid.appendChild(cell('コスト分布（8体の内訳）', costDist(R)));
+  grid.appendChild(cell('主役★3の到達率', threeStarCell(R)));
+  grid.appendChild(cell('アイテムが要る駒', itemNeedCell(R)));
+  box.appendChild(grid);
+
+  // ★3の予算曲線。押すと開く（既定は畳む）。
+  if(R.three_star && (R.three_star_curve||[]).length){
+    const d = el('details','en-orig');
+    d.appendChild(el('summary',null,'★3の到達率が予算でどう動くか（50/100/150/200 ゴールド）'));
+    const t = el('div','note');
+    t.innerHTML = R.three_star_curve.map(function(x){
+      return '・' + x.gold + 'ゴールド … ★3 <b>' + Math.round(x.p_3star*1000)/10 + '%</b>'
+           + ' / ★2 ' + Math.round(x.p_2star*1000)/10 + '%';
+    }).join('<br>')
+      + '<br>' + jp(R.three_star_note||'');
+    d.appendChild(t);
+    box.appendChild(d);
+  }
+
+  // アイテムが要る駒（F）。ソラカ・フィドルが「無料の部品」に見える問題への答え。
+  const it = R.items;
+  if(it && (it.rows||[]).length){
+    const w = el('div'); w.style.marginTop='8px';
+    w.appendChild(el('span','dim','アイテム前提の駒: '));
+    it.rows.filter(function(x){ return x.verdict==='must' || x.verdict==='maybe'; })
+      .slice(0,6).forEach(function(x){
+        const s = el('span','tag'+(x.verdict==='must'?' hit':''),
+                     unameOf(x.name) + (x.p_full_build!=null
+                       ? '（' + Math.round(x.p_full_build*100) + '%）' : ''));
+        s.title = jp(x.why || '');
+        w.appendChild(s);
+      });
+    box.appendChild(w);
+    if(it.over_subscribed)
+      box.appendChild(noteHTML('<b>アイテムが足りない。</b>'
+        + 'アイテムを前提にする駒が ' + it.must_count + ' 人いるのに、'
+        + '1ゲームで組める完成アイテムは ' + it.builds_available + ' 組（未検証）。'
+        + 'この構成は「誰に渡さないか」を決めないと成立しない。', 'var(--bad)'));
+    if(it.unknown_count)
+      box.appendChild(noteHTML('実測が無くアイテム前提かどうか判断できない駒 '
+        + it.unknown_count + ' 体: ' + (it.unknown||[]).map(unameOf).join(' / ')));
+  }
+
+  if((R.why||[]).length)
+    box.appendChild(noteHTML('なぜこの型か<br>'
+      + R.why.map(function(x){ return '・'+devHtml(x); }).join('<br>')));
+  // ★ 畳まない ★ 型の判定と盤面の中身が食い違っているという告白なので、
+  // これを畳むと型のバッジだけが独り歩きする。
+  if((R.tension||[]).length)
+    box.appendChild(noteHTML('<b>この判定の信用できない点</b><br>'
+      + R.tension.map(function(x){ return '・'+devHtml(x); }).join('<br>'), 'var(--warn)'));
+  if((R.unknown_units||[]).length)
+    box.appendChild(noteHTML('セットデータに無かった駒: '
+                             + R.unknown_units.map(unameOf).join(' / '), 'var(--bad)'));
+  return box;
+}
+
 /* ---------- 後衛に届くか ----------
    ★「跳躍を持つ」と「後衛に届く」は別物★
    Gnar は3ヘクス跳ぶが狙うのは「敵の塊」で、塊があるのは前衛なので
@@ -292,17 +1106,22 @@ function backlineState(u){
   const b = u && u.backline;
   if(!b) return {key:'none', rank:0, label:'移動なし', cls:'badge off',
                  title:'スキルの説明文に移動を表す語が無い。後衛到達の判定対象外。'};
-  const tail = (b.note||'') + (b.hexes ? '（' + b.hexes + ' ヘクス）' : '')
+  /* ★ 日本語の理由と英語の原文を分ける ★
+     以前は1本の文字列につないでいたので、押して開いたときに
+     英語の原文がそのまま本文として出ていた。原文は残すが「原文」として出す。 */
+  const tail = jp(b.note||'') + (b.hexes ? '（' + b.hexes + ' マス）' : '')
              + (b.evidence ? '\n原文: ' + b.evidence : '');
+  const jaOnly = jp(b.note||'') + (b.hexes ? '（' + b.hexes + ' マス）' : '');
   // 召喚物が飛ぶケースは「理由が分かっている除外」であって未分類ではない。
   // 同じ 'unknown' にしていたため、Maokai に未分類バッジが出るのに
   // 注記は「未分類 0 件」と言う矛盾が起きていた。
+  const ev = b.evidence || '';
   if(b.target==='summon')
-    return {key:'summon', rank:1, label:'召喚物が飛ぶ', cls:'badge off', title:tail};
+    return {key:'summon', rank:1, label:'召喚物が飛ぶ', cls:'badge off', title:tail, ja:jaOnly, en:ev};
   if(b.target==='unknown')
-    return {key:'unknown', rank:2, label:'未分類', cls:'badge warn', title:tail};
-  if(b.reaches) return {key:'reach', rank:3, label:'後衛に届く', cls:'badge ok', title:tail};
-  return {key:'front', rank:1, label:'前衛止まり', cls:'badge off', title:tail};
+    return {key:'unknown', rank:2, label:'未分類', cls:'badge warn', title:tail, ja:jaOnly, en:ev};
+  if(b.reaches) return {key:'reach', rank:3, label:'後衛に届く', cls:'badge ok', title:tail, ja:jaOnly, en:ev};
+  return {key:'front', rank:1, label:'前衛止まり', cls:'badge off', title:tail, ja:jaOnly, en:ev};
 }
 function backlineTag(u, opts){
   const st = backlineState(u);
@@ -323,7 +1142,13 @@ function backlineTag(u, opts){
       const d = el('div','note bl-why');
       d.style.cssText = 'white-space:pre-wrap;margin:4px 0 0;'
         + 'border-left:2px solid var(--line);padding-left:7px';
-      d.textContent = st.title;
+      d.appendChild(document.createTextNode(st.ja || st.title));
+      // 判定の根拠は Riot の英語の説明文。日本語の理由の下に「原文」として置く。
+      if(st.en){
+        const e = el('div','en');
+        e.textContent = '原文: ' + st.en;
+        d.appendChild(e);
+      }
       if(host) host.appendChild(d);
     };
   }
@@ -337,14 +1162,16 @@ function backlineGapsNote(){
   const has = T.units.some(function(u){ return u.backline !== undefined; });
   let h = '<b>後衛到達の判定について。</b>';
   if(!has){
-    h += '<span class="wtxt">このデータには backline が入っていない（build_app が古い）。'
+    h += '<span class="wtxt">このデータには後衛到達の判定が入っていない'
+       + '（<code>build_app</code> が古い）。'
        + '全ユニットが「移動なし」に見えるので鵜呑みにしないこと。</span>';
   } else {
     h += 'スキル説明文の移動語から判定している。分類できたのは '
        + T.units.filter(function(u){ return u.backline; }).length + ' 体 / '
        + T.units.length + ' 体。';
     h += '<br>未分類（移動語はあるが狙う相手の言い回しが未登録）: <b>' + un.length + ' 件</b>'
-       + (un.length ? '　' + un.map(function(x){ return x.name; }).join(' / ') : '（今は無い。新パッチで増える）');
+       + (un.length ? '　' + un.map(function(x){ return unameOf(x.name); }).join(' / ')
+                    : '（今は無い。新パッチで増える）');
   }
   d.innerHTML = h;
   // 取りこぼしは名前を並べるだけにして、理由は1件ずつ持たせる。
@@ -355,8 +1182,10 @@ function backlineGapsNote(){
     g.appendChild(document.createTextNode('移動語では拾えないと分かっている言い回し '
       + gaps.length + ' 件（表の印だけで判断しないこと）: '));
     gaps.forEach(function(x){
-      const s=el('span','tag',x.name);
-      s.title=(x.note||'')+(x.evidence?'\n原文: '+x.evidence:'');
+      // name は正規化済み（RekSai / TheElderDragon）で駒名表に無い。apiName で引く
+      const u=UNIT_MAP[x.apiName];
+      const s=el('span','tag', u ? uname(u) : unameOf(x.name));
+      s.title=jp(x.note||'')+(x.evidence?'\n原文: '+x.evidence:'');
       g.appendChild(s);
     });
     d.appendChild(g);
@@ -404,27 +1233,27 @@ function mkTable(cols, rows, s, onSort, onPick, isSel){
 /* ---------- units ---------- */
 function unitCols(){
   const base=[
-    {key:'cost',label:'C',render:u=>costChip(u.cost)},
+    {key:'cost',label:'コスト',render:u=>costChip(u.cost)},
     {key:'name',label:'ユニット',render:u=>{
       const d=el('span');
       d.style.cssText='display:inline-flex;align-items:center;gap:7px';
       d.appendChild(unitIcon(u,24));
-      d.appendChild(document.createTextNode(u.name));
+      d.appendChild(unitNameNode(u));
       return d;
     }},
     {key:'traits',label:'トレイト',wrap:true,render:u=>{
       const f=document.createDocumentFragment();
-      u.traits.forEach(t=>f.appendChild(el('span','tag',t)));
+      u.traits.forEach(t=>{ const s=el('span','tag',tnameOf(t)); s.title=t; f.appendChild(s); });
       return f;}},
-    {key:'dps2',label:'通常DPS 2★',num:true},
-    {key:'dps3',label:'通常DPS 3★',num:true},
-    {key:'ehp',label:'EHP(物理) 2★',num:true},
+    {key:'dps2',label:'通常攻撃の秒間ダメージ 2★',num:true},
+    {key:'dps3',label:'通常攻撃の秒間ダメージ 3★',num:true},
+    {key:'ehp',label:'実効体力(物理) 2★',num:true},
   ];
   if(mode==='study') base.push(
-    {key:'hp2',label:'HP 2★',num:true},
-    {key:'ad2',label:'AD 2★',num:true},
+    {key:'hp2',label:'体力 2★',num:true},
+    {key:'ad2',label:'攻撃力 2★',num:true},
     {key:'as',label:'攻撃速度',num:true},
-    {key:'range',label:'射程(hex)',num:true},
+    {key:'range',label:'射程(マス)',num:true},
     {key:'mana',label:'マナ',num:true},
     // ★ 8秒の戦闘で実際に何回撃てるか ★
     // 74体中38体が0回。つまり「スキルが強い」と書いてあっても、
@@ -437,11 +1266,11 @@ function unitCols(){
       const s=el('span',null, f ? ('0 回（初回 '+f+'秒）') : '0 回');
       s.style.color='var(--bad)';
       s.title='8秒の戦闘に初回詠唱が間に合っていない。'
-            + 'マナアイテム（Blue Buff / Spear of Shojin 等）が要る';
+            + 'マナアイテム（'+inameOf('Blue Buff')+' / '+inameOf('Spear of Shojin')+' 等）が要る';
       return s;}},
     // 「跳ぶか」ではなく「後衛に届くか」。中身は backlineState() のコメント参照
     {key:'backline',label:'後衛到達',render:u=>backlineTag(u)},
-    {key:'eff',label:'DPS/コスト',num:true});
+    {key:'eff',label:'秒間ダメージ÷コスト',num:true});
   return base;
 }
 const UA = {
@@ -450,7 +1279,9 @@ const UA = {
   as:u=>u.base.attackSpeed, range:u=>u.base.rangeHexes ?? u.base.range,
   mana:u=>u.base.mana, eff:u=>u.stars['2'].auto_dps/u.cost,
   casts:u=>u.stars['2'].casts,
-  traits:u=>u.traits.join(','),
+  // 表示が日本語なのに並べ替えが英語名だと、押しても順番が理解できない
+  name:u=>uname(u),
+  traits:u=>u.traits.map(tnameOf).join(','),
   // 列の中身はオブジェクトなので、並べ替えは状態の順位（届く>未分類>前衛止まり>移動なし）で行う
   backline:u=>backlineState(u).rank,
 };
@@ -464,35 +1295,41 @@ function decorate(u){
 
 function unitDetail(u){
   const c=el('div','card');
-  c.appendChild(el('h2',null,u.name));
-  const sub=el('div','note'); sub.textContent=`コスト ${u.cost} · ${u.traits.join(' / ')}`;
+  const h=el('h2'); h.appendChild(unitNameNode(u)); h.title=u.name;
+  c.appendChild(h);
+  const sub=el('div','note');
+  sub.textContent=`コスト ${u.cost} · ${u.traits.map(tnameOf).join(' / ')}`;
   c.appendChild(sub);
+  // ★ キャラから入れるようにする ★
+  // 「誰を使いたいか」から入るのが実際の入り口なので、
+  // ユニットを見ている場所には必ず構成への導線を置く。前衛でも押せる。
+  c.appendChild(axisButton(u));
 
   const sb=el('div','starbox');
   [['1','1★'],['2','2★'],['3','3★']].forEach(([k,lab])=>{
     const s=u.stars[k], d=el('div');
     d.appendChild(el('b',null,fmt(s.auto_dps)));
-    d.appendChild(el('span',null,lab+' 通常DPS'));
+    d.appendChild(el('span',null,lab+' 通常攻撃の秒間ダメージ'));
     if(s.placeholder) d.appendChild(el('span','dim','※ダミー値'));
     sb.appendChild(d);
   });
   const d4=el('div');
   d4.appendChild(el('b',null,fmt(u.stars['2'].ehp_p)));
-  d4.appendChild(el('span',null,'2★ EHP(物理)'));
+  d4.appendChild(el('span',null,'2★ 実効体力(物理)'));
   sb.appendChild(d4);
   c.appendChild(sb);
 
   const dl=el('dl','kv');
   const rows=[
-    ['HP 1/2/3★', [1,2,3].map(s=>fmt(u.stars[s].hp)).join(' / ')],
-    ['AD 1/2/3★', [1,2,3].map(s=>fmt(u.stars[s].ad)).join(' / ')],
+    ['体力 1/2/3★', [1,2,3].map(s=>fmt(u.stars[s].hp)).join(' / ')],
+    ['攻撃力 1/2/3★', [1,2,3].map(s=>fmt(u.stars[s].ad)).join(' / ')],
     ['攻撃速度', fmt(u.base.attackSpeed)],
     ['物理防御 / 魔法防御', `${fmt(u.base.armor)} / ${fmt(u.base.magicResist)}`],
-    ['射程', u.base.rangeUnits!=null ? `${fmt(u.base.range)} hex (${fmt(u.base.rangeUnits)} 単位)` : fmt(u.base.range)],
+    ['射程', u.base.rangeUnits!=null ? `${fmt(u.base.range)} マス (${fmt(u.base.rangeUnits)} 単位)` : fmt(u.base.range)],
     ['マナ', `${fmt(u.base.initialMana)} → ${fmt(u.base.mana)}`],
     ['詠唱までの間隔', u.stars['2'].cast_interval!=null?fmt(u.stars['2'].cast_interval)+' 秒':'—'],
     ['クリ率 / 倍率', `${Math.round((u.base.critChance||0)*100)}% / ×${fmt(u.base.critMultiplier)}`],
-    ['EHP 物理 / 魔法', `${fmt(u.stars['2'].ehp_p)} / ${fmt(u.stars['2'].ehp_m)}`],
+    ['実効体力 物理 / 魔法', `${fmt(u.stars['2'].ehp_p)} / ${fmt(u.stars['2'].ehp_m)}`],
   ];
   if(u.bin){
     rows.push(['移動速度', fmt(u.bin.moveSpeed)]);
@@ -503,11 +1340,19 @@ function unitDetail(u){
   c.appendChild(dl);
 
   c.appendChild(el('div','hr'));
-  const ah=el('div'); ah.appendChild(el('b',null,u.ability.name||'スキル'));
+  const ah=el('div');
+  ah.appendChild(el('b',null,(u.ability.name_ja||u.ability.name)||'スキル'));
   ah.appendChild(document.createTextNode(' '));
   ah.appendChild(el('span','badge '+(u.ability.known?'ok':'bad'), u.ability.known?'数値あり':'係数なし'));
   c.appendChild(ah);
-  c.appendChild(el('div','abil', u.ability.text || '（説明文なし）'));
+  /* スキルの説明文。@PhysicalDamageCalc1@ のような計算値は配信データに
+     数値が入っていないので「？」になる（件数を本文の下に出す）。
+     変数名をそのまま出すと英語が残るので、原文は下の「英語の原文」に置く。 */
+  c.appendChild(descNode(fillVars(u.ability.text_ja || u.ability.text || '（説明文なし）', {})));
+  // 日本語だけ出すと、判定の根拠（後衛到達など）が英語の言い回しから来ていることが
+  // 追えなくなる。原文は畳んだ中に必ず置く。
+  c.appendChild(enOriginal([['ユニット', u.name], ['スキル', u.ability.name],
+                            ['説明', u.ability.text]]));
   if(!u.ability.known)
     c.appendChild(el('div','note','このセットは Riot がスキル係数を配信していないため、スキルDPSは計算していない。'));
 
@@ -515,11 +1360,46 @@ function unitDetail(u){
   c.appendChild(el('div','note','このユニットが噛むトレイト'));
   T.traits.filter(t=>u.traits.includes(t.name)).forEach(t=>{
     const b=el('div');
-    b.appendChild(el('span','tag hit', `${t.name} (${t.breakpoints.join('/')})`));
+    const tg=el('span','tag hit', `${tnameOf(t.name)} (${t.breakpoints.join('/')})`);
+    tg.title = t.name;
+    b.appendChild(tg);
     b.appendChild(el('span','dim', ` 候補 ${t.member_count} 体`));
     c.appendChild(b);
   });
   return c;
+}
+
+/* ================= キャラから構成へ =================
+   「キャリー逆引き」をやめて、**前衛も含めて全部の駒から引ける**ようにする。
+   どの画面でユニットを押しても、その駒を軸にした構成の画面へ行く。
+   軸が前衛か後衛かは表示するだけで、ソルバーの重みは変えていない
+   （src/engine/comps.py 側の実測で、重みを変えると軸のトレイトが
+     1つも点かない解が31体中8体出たため。詳細は同ファイルの AXIS_KIND の注記）。 */
+function focusUnit(api){
+  if(!api || !UNIT_MAP[api]) return;
+  axisSel = api;
+  carrySel = api;                 // 配置・対戦中タブも同じ駒を見る
+  tab = 'carry';
+  buildTabs();
+  render();
+  window.scrollTo(0,0);
+}
+function axisButton(u){
+  const b = el('button', null, 'この駒を軸に構成を組む →');
+  b.style.cssText='background:var(--accent);color:#0d1117;border:none;border-radius:5px;'
+    + 'padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;margin:8px 0 2px';
+  b.onclick = function(ev){ ev.stopPropagation(); focusUnit(u.apiName); };
+  return b;
+}
+/* 押せるユニット札。ランキング・構成カード・一覧のどこでも同じ挙動にする。 */
+function unitChip(u, name){
+  const sp = el('span','tag');
+  sp.style.cssText='display:inline-flex;align-items:center;gap:4px;cursor:pointer';
+  if(u) sp.appendChild(unitIcon(u,20));
+  sp.appendChild(nameNode(u ? uname(u) : unameOf(name), u ? u.name : name));
+  sp.title = (u ? u.name : name) + ' — 押すとこの駒を軸にした構成を出す';
+  if(u) sp.onclick = function(ev){ ev.stopPropagation(); focusUnit(u.apiName); };
+  return sp;
 }
 
 /* ---------- render ---------- */
@@ -541,28 +1421,38 @@ function render(){
 
 function renderUnits(m){
   const ctl=el('div','controls');
-  const q=el('input'); q.type='search'; q.placeholder='ユニット名 / トレイトで絞り込み';
+  const q=el('input'); q.type='search'; q.placeholder='ユニット名 / トレイトで絞り込み（日本語・英語どちらでも）';
   const costSel=el('select');
   costSel.appendChild(new Option('全コスト',''));
   [1,2,3,4,5].forEach(c=>costSel.appendChild(new Option(c+' コスト',c)));
   const traitSel=el('select');
   traitSel.appendChild(new Option('全トレイト',''));
-  T.traits.forEach(t=>traitSel.appendChild(new Option(`${t.name} (${t.member_count})`,t.name)));
+  T.traits.forEach(t=>traitSel.appendChild(
+    new Option(`${tnameOf(t.name)} (${t.member_count})`,t.name)));
   ctl.append(q,costSel,traitSel);
   const count=el('span','dim'); ctl.appendChild(count);
   m.appendChild(ctl);
 
   const split=el('div','split'), left=el('div'), right=el('div');
   split.append(left,right); m.appendChild(split);
-  if(mode==='study') m.appendChild(backlineGapsNote());
+  if(mode==='study'){
+    // 日本語が欠けているときは畳まない。黙って英語に戻るのが一番危ない。
+    if(jaIncomplete()) m.appendChild(jaNote());
+    m.appendChild(premise('後衛到達の判定範囲／日本語データの収録状況',
+                          [backlineGapsNote(), jaIncomplete()?null:jaNote()]));
+  }
 
   function draw(){
     const term=q.value.trim().toLowerCase();
     let rows=T.units.map(decorate).filter(u=>{
       if(costSel.value && String(u.cost)!==costSel.value) return false;
       if(traitSel.value && !u.traits.includes(traitSel.value)) return false;
+      // 英語名でも日本語名でも引けること。英語名で覚えている駒がある
+      // （op.gg・配信・このツールの実測データが全部英語名）。
       if(term && !(u.name.toLowerCase().includes(term) ||
-                   u.traits.join(' ').toLowerCase().includes(term))) return false;
+                   uname(u).toLowerCase().includes(term) ||
+                   u.traits.join(' ').toLowerCase().includes(term) ||
+                   u.traits.map(tnameOf).join(' ').toLowerCase().includes(term))) return false;
       return true;
     });
     rows=sortRows(rows, sort.units, UA);
@@ -588,25 +1478,49 @@ function renderTraits(m){
   function draw(){
     const term=q.value.trim().toLowerCase();
     box.innerHTML='';
-    T.traits.filter(t=>!term||t.name.toLowerCase().includes(term)).forEach(t=>{
+    T.traits.filter(t=>!term||t.name.toLowerCase().includes(term)
+                       ||tnameOf(t.name).toLowerCase().includes(term)).forEach(t=>{
       const c=el('div','card'); c.style.position='static'; c.style.marginBottom='10px'; c.style.maxHeight='none';
-      const h=el('h2',null,t.name);
+      const h=el('h2'); h.appendChild(nameNode(tnameOf(t.name), t.name)); h.title=t.name;
       c.appendChild(h);
       c.appendChild(el('div','note',`発動 ${t.breakpoints.join(' / ')} · 候補 ${t.member_count} 体`));
-      if(mode==='study' && t.desc) c.appendChild(el('div','abil',t.desc));
+      // 説明文は段ごとの数値を埋めてから出す（埋めないと @MinUnits@ が画面に残る）
+      if(mode==='study' && (t.desc_ja || t.desc))
+        c.appendChild(descNode(traitDescFilled(t)));
       t.tiers.forEach(x=>{
-        const vars=Object.entries(x.variables).map(([k,v])=>`${k}=${fmt(v)}`).join('  ');
+        // 変数名は日本語に直す。訳語が無いものは英語を出さず件数だけにする
+        const named=[], unreg=[];
+        Object.keys(x.variables||{}).forEach(function(k){
+          const rr=termJa(k);
+          if(rr.ok) named.push(rr.text+' = '+fmt(x.variables[k])); else unreg.push(k);
+        });
+        if(unreg.length) named.push('日本語名が未登録の変数 '+unreg.length+' 個');
+        const vars=named.join('　');
         const d=el('div','note');
-        d.innerHTML = `<b>${x.minUnits} 体</b>　${vars||'<span class="dim">数値なし</span>'}`;
+        // maxUnits は「この段が効くのは何体まで」。build_app が落としていると undefined。
+        // minUnits が無い段がデータに1件あり「null 体」と出ていたので、そこも出し分ける。
+        const range = (x.minUnits==null) ? '人数不明'
+          : ((x.maxUnits!=null && x.maxUnits<99)
+              ? `${x.minUnits}〜${x.maxUnits} 体` : `${x.minUnits} 体`);
+        d.innerHTML = `<b>${range}</b>　${vars||'<span class="dim">数値なし</span>'}`;
         c.appendChild(d);
       });
       const mem=el('div');
       t.members.forEach(n=>{
         const u=T.units.find(x=>x.name===n);
-        const s=el('span','tag', u?`${n} (${u.cost})`:n);
+        const s=unitChip(u, n);
+        if(u) s.appendChild(el('span','dim',' ('+u.cost+')'));
         mem.appendChild(s);
       });
       c.appendChild(mem);
+      if(mode==='study' && t.desc_ja && t.desc){
+        c.appendChild(enOriginal([['トレイト', t.name], ['説明', t.desc]]));
+        const raw = [];
+        (t.tiers||[]).forEach(function(x){ Object.keys(x.variables||{}).forEach(function(k){
+          raw.push(k+'='+fmt(x.variables[k])); }); });
+        const rv = rawValues('段の数値', raw);
+        if(rv) c.appendChild(rv);
+      }
       box.appendChild(c);
     });
   }
@@ -617,7 +1531,7 @@ function renderItems(m){
   const ctl=el('div','controls');
   const q=el('input'); q.type='search'; q.placeholder='アイテム名で絞り込み';
   const cat=el('select'); cat.appendChild(new Option('全種別',''));
-  [...new Set(T.items.map(i=>i.category))].forEach(c=>cat.appendChild(new Option(c,c)));
+  [...new Set(T.items.map(i=>i.category))].forEach(c=>cat.appendChild(new Option(categoryJa(c),c)));
   ctl.append(q,cat);
   const count=el('span','dim'); ctl.appendChild(count);
   m.appendChild(ctl);
@@ -625,27 +1539,41 @@ function renderItems(m){
 
   const keys=[...new Set(T.items.flatMap(i=>Object.keys(i.effects)))]
     .filter(k=>T.items.filter(i=>k in i.effects).length>=4).sort();
-  const compText = i=>i.composition.map(x=>{
-    const it=T.items.find(y=>y.apiName===x); return it?it.name:x;}).join(' + ')||'—';
+  /* 素材は apiName が別系統（DA_Component_… と TFT_Item_…）で当たらず、
+     エンブレムなど56件で `TFT_Item_Spatula` のような識別子が画面に出ていた。
+     itemNameByApi が明示レジストリで橋渡しする。 */
+  const compText = i=>i.composition.map(itemNameByApi).join(' + ')||'—';
   /* ★ 並べ替えの取り出し方を渡さないと、ヘッダを押しても並びが変わらない ★
      sortRows は既定で row[列キー] を読む。効果の値は i.effects[キー] の下にあり、
      素材は render で組み立てる文字列なので、どちらも row 直下には無い。
      ここに {} を渡していたため、28列のうち25列（効果24＋素材）は
      ▲▼ だけ付いて並びは1行も動いていなかった。押せば直ったように見えるのが悪い。 */
-  const ACC = {comp: compText};
+  const ACC = {comp: compText, name: i=>(i.name_ja||i.name)};
   keys.forEach(k=>{ ACC[k] = i=>i.effects[k]; });
   function draw(){
     const term=q.value.trim().toLowerCase();
     const rows=T.items.filter(i=>(!cat.value||i.category===cat.value) &&
-      (!term||(i.name||'').toLowerCase().includes(term)));
+      (!term||(i.name||'').toLowerCase().includes(term)
+            ||(i.name_ja||'').toLowerCase().includes(term)));
     count.textContent=`${rows.length} 件`;
     const cols=[
-      {key:'name',label:'アイテム'},
-      {key:'category',label:'種別'},
+      {key:'name',label:'アイテム',render:i=>{
+        const s=el('span'); s.title=i.name;
+        s.appendChild(nameNode(i.name_ja||i.name, i.name)); return s;}},
+      {key:'category',label:'種別',render:i=>categoryJa(i.category)},
       {key:'comp',label:'素材',wrap:true,render:compText},
-      ...keys.map(k=>({key:k,label:k,num:true,render:i=>i.effects[k]})),
+      // 列見出しは配信データの変数名だった（AD / BonusPercentHP / GrievousWoundsPercent …）。
+      // 日本語名に直し、元の変数名は title に残す。
+      ...keys.map(k=>({key:k,label:termLabel(k),num:true,render:i=>i.effects[k]})),
     ];
-    if(mode==='study') cols.push({key:'desc',label:'効果',wrap:true});
+    // 効果は日本語（Riot の正規表記）。@変数@ には effects の実数を埋める。
+    if(mode==='study') cols.push({key:'desc',label:'効果',wrap:true,
+      render:i=>{
+        const d=el('span');
+        d.appendChild(descSpan(fillVars(i.desc_ja || i.desc || '—', itemVars(i))));
+        if(showEn && i.desc_ja && i.desc && i.desc_ja!==i.desc)
+          d.appendChild(el('div','en', i.desc));
+        return d;}});
     box.innerHTML='';
     box.appendChild(mkTable(cols, sortRows(rows,sort.items,ACC), sort.items,
       k=>{ if(sort.items.key===k) sort.items.dir*=-1; else {sort.items.key=k; sort.items.dir=1;} draw(); }));
@@ -733,13 +1661,13 @@ function recommendAugments(ctx, limit){
     const why = [];
     let score = 0;
     (a.mentions_traits||[]).forEach(t=>{
-      if(traitNames.has(t)){ score += 5; why.push({w:'強', t:'発動中の '+t+' を名指ししている'}); }
+      if(traitNames.has(t)){ score += 5; why.push({w:'強', t:'発動中の '+tnameOf(t)+' を名指ししている'}); }
     });
     (a.mentions_units||[]).forEach(u=>{
-      if(unitNames.has(u)){ score += 5; why.push({w:'強', t:'構成の '+u+' を名指ししている'}); }
+      if(unitNames.has(u)){ score += 5; why.push({w:'強', t:'構成の '+unameOf(u)+' を名指ししている'}); }
     });
     if(carryAxis && (a.axis||[]).indexOf(carryAxis)>=0){
-      score += 3; why.push({w:'中', t:'キャリーの '+carryAxis+' に乗る効果'});
+      score += 3; why.push({w:'中', t:'キャリーの '+scaleJa(carryAxis)+' に乗る効果'});
     }
     if((a.axis||[]).indexOf('耐久')>=0){ score += 1; why.push({w:'弱', t:'前衛の耐久に効く'}); }
     if((a.axis||[]).indexOf('アイテム')>=0){ score += 1; why.push({w:'弱', t:'アイテムが増える'}); }
@@ -770,13 +1698,14 @@ function suggestCompChanges(taken, ctx){
       const members = T.units.filter(u=>(u.traits||[]).indexOf(t)>=0 && u.purchasable!==false);
       const missing = members.filter(u=>!have.has(u.name));
       out.push({aug:a.name, kind:'trait', target:t,
-        text: n+' は '+t+' のためのオーグメント。いまの構成では '+t+' が発動していない。',
+        text: (a.name_ja||n)+' は '+tnameOf(t)+' のためのオーグメント。いまの構成では '
+              +tnameOf(t)+' が発動していない。',
         add: missing.slice(0,6).map(u=>u.name)});
     });
     (a.mentions_units||[]).forEach(u=>{
       if(have.has(u)) return;
       out.push({aug:a.name, kind:'unit', target:u,
-        text: n+' は '+u+' を名指ししている。いまの構成に居ない。',
+        text: (a.name_ja||n)+' は '+unameOf(u)+' を名指ししている。いまの構成に居ない。',
         add: [u]});
     });
   });
@@ -856,7 +1785,7 @@ function applyAugToUnit(unit, st){
 function augEffectCard(unit, takenNames){
   const c = el('div','card');
   c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
-  c.appendChild(el('h2',null,'取ったオーグメントでキャリーがどう変わるか — '+unit.name));
+  c.appendChild(el('h2',null,'取ったオーグメントでキャリーがどう変わるか — '+uname(unit)));
   if(!takenNames.length){
     c.appendChild(el('div','note','オーグメントを取ると、ここに数値の変化が出る。'));
     return c;
@@ -909,7 +1838,8 @@ function augEffectCard(unit, takenNames){
     h.appendChild(b); c.appendChild(h);
     if(desc) c.appendChild(el('div','note',desc));
     const ul=el('div','note');
-    ul.innerHTML = arr.map(function(x){ return '・'+String(x).replace(/</g,'&lt;'); }).join('<br>');
+    // Python が組み立てた文。駒名・トレイト名・変数名を日本語に差し替える
+    ul.innerHTML = arr.map(function(x){ return '・'+devHtml(String(x)); }).join('<br>');
     c.appendChild(ul);
   }
   block('計算に入れた', st.applied, 'var(--ok)');
@@ -940,7 +1870,7 @@ function renderLive(m){
   const ctl=el('div','controls');
   const sel=el('select');
   T.units.slice().sort((a,b)=>b.cost-a.cost||a.name.localeCompare(b.name))
-    .forEach(u=>sel.appendChild(new Option(u.name+' (c'+u.cost+')', u.apiName)));
+    .forEach(u=>sel.appendChild(new Option(optName(u), u.apiName)));
   sel.value=liveState.carryApi;
   const size=el('select');
   [6,7,8,9,10].forEach(n=>size.appendChild(new Option('盤面 '+n+' 体',n)));
@@ -954,12 +1884,13 @@ function renderLive(m){
   m.appendChild(ctl);
 
   const note=el('div','note');
-  note.innerHTML='<b>キャリーを選んで、取ったオーグメントを押すだけ。</b>'
-    +'構成は自動で組む。<br>'
-    +'<b>ここは「順位が上がる順」ではない。</b>噛み合いの根拠が何本あるかで並べている '
+  note.innerHTML='<b>ここは「順位が上がる順」ではない。</b>噛み合いの根拠が何本あるかで並べている '
     +'── オーグメントの組み合わせ別の実測成績は、どのデータ源にも存在しないため。'
     +'根拠は1本ずつ出すので、納得できないものは無視してよい。';
-  m.appendChild(note);
+  // 対戦中に出す画面なので、操作の1行だけ残して前提は畳む。
+  m.appendChild(noteHTML('<b>キャリーを選んで、取ったオーグメントを押すだけ。</b>構成は自動で組む。'));
+  m.appendChild(premise('順位ではなく噛み合いの本数で並べている（実測が存在しないため）',
+                        [note]));
 
   const hits=el('div'); m.appendChild(hits);
   const box=el('div'); m.appendChild(box);
@@ -977,12 +1908,18 @@ function renderLive(m){
     const term=q.value.trim().toLowerCase();
     if(!term) return;
     const found=currentAugments()
-      .filter(a=>(a.name||'').toLowerCase().indexOf(term)>=0)
+      .filter(a=>(a.name||'').toLowerCase().indexOf(term)>=0
+                ||(a.name_ja||'').toLowerCase().indexOf(term)>=0)
       .filter(a=>liveState.taken.indexOf(a.name)<0).slice(0,12);
     if(!found.length){ hits.appendChild(el('div','note','見つからない')); return; }
     const w=el('div'); w.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:6px 0';
     found.forEach(a=>{
-      const b=el('button',null,a.name+'（'+(a.rarity||'?')+'）');
+      /* ★ 英語名は薄い字で添える（.en）★
+         検索は英語でも日本語でも打てるので、打った文字列がどの候補に
+         当たったのかが見えないと選べない。ただし本文は日本語で、
+         英語は「原文の添え物」だと分かる見た目にする。 */
+      const b=el('button',null,(a.name_ja||a.name)+'（'+rarityJa(a.rarity)+'）');
+      if(a.name_ja && a.name_ja!==a.name) b.appendChild(el('span','en','  '+a.name));
       b.style.cssText='background:var(--panel2);color:var(--fg);border:1px solid var(--line);'
         +'border-radius:5px;padding:6px 10px;cursor:pointer;font-size:13px';
       b.onclick=()=>{ liveState.taken.push(a.name); q.value=''; hits.innerHTML=''; draw(); };
@@ -1005,8 +1942,8 @@ function renderLive(m){
       const w=el('div'); w.style.cssText='display:flex;flex-wrap:wrap;gap:6px';
       liveState.taken.forEach((n,i)=>{
         const a=currentAugments().filter(x=>x.name===n)[0]||{};
-        const sp=el('span','tag hit',(i+1)+'. '+n+'（'+(a.rarity||'?')+'） ×');
-        sp.style.cursor='pointer'; sp.title='押すと外す';
+        const sp=el('span','tag hit',(i+1)+'. '+(a.name_ja||n)+'（'+rarityJa(a.rarity)+'） ×');
+        sp.style.cursor='pointer'; sp.title=n+'　押すと外す';
         sp.onclick=()=>{ liveState.taken.splice(i,1); draw(); };
         w.appendChild(sp);
       });
@@ -1014,7 +1951,7 @@ function renderLive(m){
       const ban=[...bannedBy(liveState.taken)];
       if(ban.length){
         const d=el('div','note'); d.style.color='var(--bad)';
-        d.textContent='これでもう取れない: '+ban.join(' / ');
+        d.textContent='これでもう取れない: '+ban.map(anameOf).join(' / ');
         t.appendChild(d);
       }
     }
@@ -1042,7 +1979,7 @@ function renderLive(m){
             const u=T.units.filter(y=>y.name===n)[0];
             const sp=el('span','tag');
             if(u){ sp.appendChild(unitIcon(u,20)); }
-            sp.appendChild(document.createTextNode(' '+n+(u?(' c'+u.cost):'')));
+            sp.appendChild(document.createTextNode(' '+unameOf(n)+(u?('（コスト'+u.cost+'）'):'')));
             sp.style.cssText='display:inline-flex;align-items:center;gap:4px';
             w.appendChild(sp);
           });
@@ -1060,8 +1997,8 @@ function renderLive(m){
     r.appendChild(el('h2',null,'次に取るなら（噛み合いの根拠がある順）'));
     const sub=el('div','note');
     sub.innerHTML='いまの構成: '
-      + (c.units||[]).map(u=>u.name).join(' / ')
-      + '<br>発動中: ' + (c.traits||[]).join(' / ');
+      + (c.units||[]).map(uname).join(' / ')
+      + '<br>発動中: ' + (c.traits||[]).map(tnameOf).join(' / ');
     r.appendChild(sub);
     if(!rec.length){
       r.appendChild(el('div','note','噛み合いの根拠があるものが見つからない。'));
@@ -1074,8 +2011,8 @@ function renderLive(m){
       rec.forEach(x=>{
         const row=el('tr');
         row.appendChild(el('td',null,whySummary(x.why)));
-        row.appendChild(el('td',null,x.aug.rarity||'?'));
-        row.appendChild(el('td',null,x.aug.name));
+        row.appendChild(el('td',null,rarityJa(x.aug.rarity)));
+        row.appendChild(el('td',null,x.aug.name_ja||x.aug.name));
         row.appendChild(whyCell(x.why));
         tb.appendChild(row);
       });
@@ -1089,7 +2026,7 @@ function renderLive(m){
     box.appendChild(r);
   }
 
-  sel.onchange=()=>{ liveState.carryApi=sel.value; carrySel=sel.value; draw(); };
+  sel.onchange=()=>{ liveState.carryApi=sel.value; carrySel=sel.value; axisSel=sel.value; draw(); };
   size.onchange=()=>{ liveState.size=parseInt(size.value,10); draw(); };
   q.oninput=drawSearch;
   reset.onclick=()=>{ liveState.taken=[]; draw(); };
@@ -1102,10 +2039,10 @@ function renderAugments(m){
   const ctl=el('div','controls');
   const q=el('input'); q.type='search'; q.placeholder='オーグメント名で絞り込み';
   const r=el('select'); r.appendChild(new Option('全レアリティ',''));
-  ['Silver','Gold','Prismatic'].forEach(x=>r.appendChild(new Option(x,x)));
+  ['Silver','Gold','Prismatic'].forEach(x=>r.appendChild(new Option(rarityJa(x),x)));
   // 配信データには旧セットの同名レコードも混ざっている。既定では現行だけ出す。
   const eng=el('select');
-  eng.appendChild(new Option('現行エンジン（Set18）','current'));
+  eng.appendChild(new Option('現行エンジン（セット'+(T.meta.set_number||18)+'）','current'));
   eng.appendChild(new Option('旧セット由来のレコードも含む',''));
   ctl.append(q,r,eng);
   const count=el('span','dim'); ctl.appendChild(count);
@@ -1121,26 +2058,45 @@ function renderAugments(m){
   const withTag=cur.filter(a=>a.riot_tags&&a.riot_tags.length).length;
   note.innerHTML =
     '配信データには <b>'+T.augments.length+' レコード</b>あるが、名前の実体は <b>'+uniq+' 種</b>。'
-    + '現行エンジン（apiName が <code>DA_</code>）が '+cur.length+' 件で、残りは旧セット由来の同名レコード。'
+    + '現行エンジン（識別子が <code>DA_</code> で始まるもの）が '+cur.length+' 件で、'
+    + '残りは旧セット由来の同名レコード。'
     + '<br>効果の変数名は3段で復元してある（現在 <b>'+recov+' 件</b>で復元済み、'
     + '<b>'+unnamed+' 件</b>にまだ名前不明の数値が残る）。'
     + '説明文には実数値を埋めてある（埋められなかった箇所は <code>@名前@</code> のまま。'
     + '<b>'+unfilled+' 件</b>）。'
-    + '<br><b>レアリティは Riot 自身のタグ（map22 の ItemTags）で確定している。</b>'
+    + '<br><b>レアリティは Riot 自身のタグ（<code>map22</code> の <code>ItemTags</code>）'
+    + 'で確定している。</b>'
     + '画像ファイル名から推測していたときは不明79件・食い違い15件があったが、いまは0件。'
+    + '<br><b>効果の変数名は日本語に直して出している。</b>'
+    + '訳語を当てられない（旧セット名や固有名を含む）変数は <b>'
+    + (function(){
+        const s = {};
+        cur.forEach(function(a){ Object.keys(a.effects||{}).forEach(function(k){
+          if(!termJa(k).ok) s[k] = 1; }); });
+        return Object.keys(s).length;
+      })()
+    + ' 種</b>あり、これは「未登録」と件数だけ出して、'
+    + '生の名前は行を押した先の「効果の数値」に畳んで残してある。'
     + '<br><b>行をクリックすると「次の一手」を出す。</b>'
     + '排他 '+withEx+' 件 / 系統分け '+withTag+' 件が Riot の一次データから取れている。';
-  m.appendChild(note);
-
   const warn=el('div','note');
   warn.style.color='var(--warn)';
   warn.innerHTML='<b>「こっちの方が順位が上がる」は出さない。</b>'
     + 'オーグメントの組み合わせ別の実測成績は、どのデータ源にも存在しない'
     + '（op.gg のオーグメントページは編集部のティア表で、平均順位も試合数も持っていない）。'
-    + 'ステージ（2-1 / 3-2 / 4-2）ごとの出現表も Set18 のデータには無い。'
+    + 'ステージ（2-1 / 3-2 / 4-2）ごとの出現表もこのセットのデータには無い。'
     + 'なので出すのは<b>「矛盾しない次の一手」</b>まで ── '
     + '取れなくなるもの（Riot の排他データ）と、同じ系統のもの（Riot 自身のタグ）。';
-  m.appendChild(warn);
+  // 文字が多すぎるので畳む。**消していない**（summary に何が畳まれているか書く）。
+  const drift = driftNames();
+  m.appendChild(premise(
+    '順位は出さない／レコード数と名前の実体数は違う／日本語と英語で食い違う ' + drift.size + ' 件',
+    [warn, note, jaNote(),
+     drift.size ? noteHTML('<b>日本語と英語で説明が食い違うオーグメントが '
+        + drift.size + ' 件</b>（Riot の日本語版と英語版でリビジョンが違う）: '
+        + Array.from(drift).map(anameOf).join(' / ')
+        + '。<b>効果そのものが別物のものがある</b>（'+anameOf('Flame On')+'）ので、'
+        + 'この4件は一覧・詳細で英語の原文も畳まずに並べてある。', 'var(--warn)') : null]));
 
   const detail=el('div'); m.appendChild(detail);
   const box=el('div'); m.appendChild(box);
@@ -1160,8 +2116,22 @@ function renderAugments(m){
     detail.innerHTML='';
     const c=el('div','card');
     c.style.position='static'; c.style.maxHeight='none'; c.style.margin='12px 0';
-    c.appendChild(el('h2',null,'次の一手 — '+a.name+'（'+(a.rarity||'不明')+'）'));
-    if(a.desc) c.appendChild(el('div','note',a.desc));
+    c.appendChild(el('h2',null,'次の一手 — '+fillVars(a.name_ja||a.name, augVars(a)).text
+                               +'（'+rarityJa(a.rarity)+'）'));
+    if(a.desc_ja || a.desc)
+      c.appendChild(descNode(fillVars(a.desc_ja || a.desc, augVars(a)), 'note'));
+    if(drift.has(a.name) && a.desc)
+      c.appendChild(noteHTML('<b>日本語版と英語版で説明が食い違う。</b>'
+        + '<span class="en">英語版: '
+        + String(a.desc).replace(/</g,'&lt;') + '</span>', 'var(--warn)'));
+    else if(a.desc_ja && a.desc && a.desc_ja!==a.desc)
+      c.appendChild(enOriginal([['オーグメント', a.name], ['説明', a.desc]]));
+    // 効果の生の数値（英語の変数名）は畳んで残す。消さない。
+    (function(){
+      const raw = Object.keys(a.effects||{}).map(function(k){ return k+'='+fmt(a.effects[k]); });
+      const rv = rawValues('効果の数値', raw);
+      if(rv) c.appendChild(rv);
+    })();
 
     if(a.tag_labels && a.tag_labels.length){
       const d=el('div'); d.style.margin='6px 0';
@@ -1184,7 +2154,8 @@ function renderAugments(m){
       names.forEach(n=>{
         const other=byName(n);
         const t=el('span','tag'+(color==='var(--bad)'?'':' hit'),
-                   n+(other&&other.rarity?(' ('+other.rarity+')'):''));
+                   anameOf(n)+(other&&other.rarity?('（'+rarityJa(other.rarity)+'）'):''));
+        t.title=n;
         t.style.cursor='pointer';
         t.onclick=()=>{ if(other){ showDetail(other); window.scrollTo(0,0); } };
         w.appendChild(t);
@@ -1193,7 +2164,7 @@ function renderAugments(m){
     }
 
     block('これを取ると取れなくなる', a.excludes||[], 'var(--bad)',
-          'Riot の排他データ（map22 の MutuallyExclusiveItems）。推測ではない。');
+          'Riot の排他データ（マップデータの排他リスト）。推測ではない。');
 
     const mine = narrowTags(a);
     // 排他になっているものは「同じ系統」から外す。取れないものを候補に並べない。
@@ -1220,12 +2191,17 @@ function renderAugments(m){
     const term=q.value.trim().toLowerCase();
     const rows=T.augments.filter(a=>(!r.value||a.rarity===r.value) &&
       (!eng.value||a.engine===eng.value) &&
-      (!term||(a.name||'').toLowerCase().includes(term)));
+      (!term||(a.name||'').toLowerCase().includes(term)
+            ||(a.name_ja||'').toLowerCase().includes(term)));
     count.textContent=`${rows.length} 件`;
     box.innerHTML='';
     const tbl=mkTable([
-      {key:'rarity',label:'レアリティ',render:a=>a.rarity||'不明'},
-      {key:'name',label:'オーグメント'},
+      {key:'rarity',label:'レアリティ',render:a=>rarityJa(a.rarity)},
+      {key:'name',label:'オーグメント',render:a=>{
+        const s=el('span'); s.title=a.name;
+        // 名前にも @Gold@ のような変数が入っているものがある（1件）
+        s.appendChild(nameNode(fillVars(a.name_ja||a.name, augVars(a)).text, a.name));
+        return s;}},
       {key:'chain',label:'次の一手',render:a=>{
         const bits=[];
         if(a.excludes&&a.excludes.length) bits.push('排他'+a.excludes.length);
@@ -1233,19 +2209,48 @@ function renderAugments(m){
         const sp=el('span','dim',bits.join(' / ')||'—');
         return sp;
       }},
+      /* ★ ここが画面でいちばん英語の多い列だった ★
+         配信データの変数名を `CritChance=0.15` のまま並べていたので、
+         オーグメントのタブだけで900語の英単語が出ていた。
+         変数名は日本語に直し、英語のままの生データは行を押した先の
+         「効果の数値（配信データの英語表記）」に畳んで残してある。 */
       {key:'eff',label:'効果数値',wrap:true,
        render:a=>{
-         const named=Object.entries(a.effects).map(([k,v])=>`${k}=${fmt(v)}`).join('  ');
-         if(!a.unnamed_values) return named||'—';
-         const w=`（名前不明の数値 ${a.unnamed_values} 個）`;
-         return named ? named+'  '+w : w;
+         /* ★ 日本語名が未登録の変数はここに英語で出さない ★
+            オーグメントの変数名には旧セット名や固有名（Macao / Inkborn …）が
+            混ざっていて、訳語を当てると嘘になる。件数だけ出して、
+            生の名前は行を押した先の「効果の数値」（畳んである）に残す。 */
+         const named=[], unreg=[];
+         Object.keys(a.effects||{}).forEach(function(k){
+           const r = termJa(k);
+           if(r.ok) named.push(r.text+' = '+fmt(a.effects[k]));
+           else unreg.push(k);
+         });
+         const bits = named.slice();
+         if(unreg.length) bits.push('日本語名が未登録の変数 '+unreg.length+' 個');
+         if(a.unnamed_values) bits.push('名前不明の数値 '+a.unnamed_values+' 個');
+         return bits.join('　')||'—';
        }},
-      {key:'desc',label:'説明',wrap:true},
-    ], sortRows(rows,sort.augments,{rarity:a=>ORDER[a.rarity]??9}), sort.augments,
+      {key:'desc',label:'説明',wrap:true,render:a=>{
+        const d=el('span');
+        d.appendChild(descSpan(fillVars(a.desc_ja || a.desc || '—', augVars(a))));
+        // 日本語と英語でリビジョンが違う4件は、英語を畳まずに並べる。
+        // 片方だけ出すと誤情報になる（Flame On は効果そのものが別）。
+        if(drift.has(a.name) && a.desc){
+          const w=el('div','en'); w.style.color='var(--warn)';
+          w.textContent='英語版: '+a.desc;
+          d.appendChild(w);
+        } else if(showEn && a.desc_ja && a.desc && a.desc_ja!==a.desc){
+          d.appendChild(el('div','en', a.desc));
+        }
+        return d;}},
+    ], sortRows(rows,sort.augments,{rarity:a=>ORDER[a.rarity]??9,
+                                    name:a=>(a.name_ja||a.name)}), sort.augments,
       k=>{ if(sort.augments.key===k) sort.augments.dir*=-1; else {sort.augments.key=k; sort.augments.dir=1;} draw(); });
     // 行クリックで詳細
     const bodyRows=tbl.querySelectorAll('tbody tr');
-    const shown=sortRows(rows,sort.augments,{rarity:a=>ORDER[a.rarity]??9});
+    const shown=sortRows(rows,sort.augments,{rarity:a=>ORDER[a.rarity]??9,
+                                             name:a=>(a.name_ja||a.name)});
     bodyRows.forEach((tr,i)=>{
       tr.style.cursor='pointer';
       tr.onclick=()=>showDetail(shown[i]);
@@ -1307,7 +2312,6 @@ function renderForecast(m){
     + '<br><b>「まだ空いているか」は総合スコアから外した。</b>使用率は実測（前パッチ）で、'
     + '低い理由が「気づかれていない」のか「単に弱い」のか区別できないため、'
     + '点数に混ぜず<b>絞り込みと並べ替えだけ</b>に使う。';
-  m.appendChild(note);
 
   const warn=el('div','note');
   warn.style.color='var(--warn)';
@@ -1317,22 +2321,29 @@ function renderForecast(m){
     + '使用率が低い理由が「単に弱いから」である可能性も区別できない。'
     + 'だから下の表には<b>バフの中身</b>を必ず出している。最後は自分で判断すること。'
     + '重み（キャリー3倍・トレイト2倍・1件あたり上限35%）はすべて<b>未検証</b>。';
-  m.appendChild(warn);
 
   // 総合スコアの重みが未検証であることは、エンジン側が weights_unverified で明示してくる。
-  // 隠すのが一番危ないので、立っているあいだは必ず画面に出す。
+  // 隠すのが一番危ないので、**畳んでも summary に必ず残す**。
   const W = F.score_weights;
-  if((F.rows||[]).some(function(r){ return r.weights_unverified; })){
-    const wu=el('div','note');
+  let wu = null;
+  const unverified = (F.rows||[]).some(function(r){ return r.weights_unverified; });
+  if(unverified){
+    wu=el('div','note');
     wu.style.color='var(--warn)';
     wu.innerHTML='<b>総合スコアの重みは未検証。</b>'
       + (W ? '追い風 ' + W.tailwind + ' / 組みやすさ ' + W.build
              + ' / 派生 ' + W.derive + ' / ゴールド ' + W.gold
-             + '（派生の満点 hard ' + W.hard_full + '・soft ' + W.soft_full
-             + '、ゴールドは ' + W.gold_pivot + 'G を基準に ' + W.gold_span + 'G 幅で正規化）。' : '')
+             + '（派生の満点 厳しい方 ' + W.hard_full + '・ゆるい方 ' + W.soft_full
+             + '、ゴールドは ' + W.gold_pivot + ' ゴールドを基準に ' + W.gold_span
+             + ' ゴールド幅で正規化）。' : '')
       + '実測で決めた値ではないので、<b>総合の順位そのものより各列の生の数字を見ること</b>。';
-    m.appendChild(wu);
   }
+  // 「文字が多すぎる」への対応。畳むが消さない。
+  m.appendChild(premise(
+    '「強い」とは言っていない'
+    + (unverified ? '／総合スコアの重みは未検証' : '')
+    + '／ゴールドに購入費以外は入っていない',
+    [warn, note, wu, rollAssumptionsNote()]));
 
   const box=el('div'); m.appendChild(box);
 
@@ -1363,7 +2374,10 @@ function renderForecast(m){
       const head=el('h2');
       const u=UNIT_MAP[r.carryApi];
       if(u) head.appendChild(unitIcon(u,26));
-      head.appendChild(document.createTextNode(' '+r.carry+'（c'+r.cost+'）'));
+      head.appendChild(document.createTextNode(' '+(u?uname(u):unameOf(r.carry))+'（コスト'+r.cost+'）'));
+      // ★ 何レベルで回す型か ★
+      // 「構成が誰がいいのか分からない」への答えはここ。名前の隣に置く。
+      head.appendChild(rollBadge(rollOf(r), true));
       // キャリーが後衛に届くかは構成の性格そのものなので、名前の横に必ず出す
       if(u) head.appendChild(backlineTag(u));
       // 「強いが一本道」は最も効く判断材料なので、見出しの高さで出す
@@ -1414,7 +2428,7 @@ function renderForecast(m){
       // 基準を超えたら赤。間は色を付けない（連続量なので白黒に割らない）。
       const piv = (W && W.gold_pivot) || 75, span = (W && W.gold_span) || 30;
       const gchip = chip('ゴールド（最低〜全2★）',
-        G.missing ? 'データなし' : (G.floor + '〜' + G.all_2star + ' G'),
+        G.missing ? 'データなし' : (G.floor + '〜' + G.all_2star + ' ゴールド'),
         G.missing ? null : (G.all_2star <= piv-span/2 ? true
                             : (G.all_2star >= piv ? false : null)));
       gchip.title = G.missing
@@ -1428,6 +2442,9 @@ function renderForecast(m){
                                                 String(r.measured_place), null));
       c.appendChild(bar);
 
+      // 何レベルで回す型か／コスト分布／★3／アイテム需要
+      c.appendChild(rollBlock(r));
+
       // 使用率は chip から降ろしたが、絞り込みの基準として見えている必要があるので残す。
       // スコアに入っていないことを毎回書く（入っていると誤解されるのが一番まずい）。
       if(r.used){
@@ -1440,18 +2457,18 @@ function renderForecast(m){
       // 構成
       const comp=el('div');
       comp.style.cssText='display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px';
+      // ★ どの駒を押しても、その駒を軸にした構成へ行ける ★
+      // 「誰を使いたいか」から入るのが実際の入り口なので、前衛でも押せるようにする。
       (r.units||[]).forEach(function(n,i){
         const uu=T.units.filter(x=>x.name===n)[0];
-        const sp=el('span','tag'+(i===0?' hit':''));
-        sp.style.cssText='display:inline-flex;align-items:center;gap:4px';
-        if(uu) sp.appendChild(unitIcon(uu,20));
-        sp.appendChild(document.createTextNode(n+(i===0?' ★':'')));
+        const sp=unitChip(uu, n);
+        if(i===0){ sp.classList.add('hit'); sp.appendChild(document.createTextNode(' ★')); }
         comp.appendChild(sp);
       });
       c.appendChild(comp);
       if((r.traits||[]).length){
         const tr=el('div','note');
-        tr.textContent='発動: '+r.traits.join(' / ');
+        tr.textContent='発動: '+r.traits.map(tnameOf).join(' / ');
         c.appendChild(tr);
       }
 
@@ -1460,7 +2477,9 @@ function renderForecast(m){
         const w=el('div'); w.style.marginTop='8px';
         w.appendChild(el('b',null,'このパッチで何が変わったか'));
         const ul=el('div','note');
-        ul.innerHTML = r.why.map(function(x){ return '・'+x; }).join('<br>');
+        // この文は Python が組み立てたもので、中の駒名・トレイト名は英語。
+        // 登録済みの名前だけ差し替える（知らない語は英語のまま残す）。
+        ul.innerHTML = r.why.map(function(x){ return '・'+devHtml(x); }).join('<br>');
         w.appendChild(ul);
         c.appendChild(w);
       } else {
@@ -1528,14 +2547,19 @@ function sinkMissing(rows, acc){
 }
 
 const RUA = {   // キャリーのランキングの並べ替え
-  rank:u=>u.rank, cost:u=>u.cost, name:u=>u.name,
+  rank:u=>u.rank, cost:u=>u.cost, name:u=>uname(u),
   theo:u=>theoTop(u), per:u=>{ const t=theoTop(u); return t==null?null:t/u.cost; },
   casts:u=>(u.stars&&u.stars['2']?u.stars['2'].casts:null),
   backline:u=>backlineState(u).rank,
-  items:u=>{ const b=theoBis(u); return b?b.items.join(' / '):''; },
+  items:u=>{ const b=theoBis(u); return b?b.items.map(inameOf).join(' / '):''; },
 };
 const RCA = {   // 構成のランキングの並べ替え
-  rank:r=>r.rank, carry:r=>r.carry, cost:r=>r.cost,
+  rank:r=>r.rank, carry:r=>unameOf(r.carry), cost:r=>r.cost,
+  // 型は Lv の数字で並べる。判定できないものは null にして末尾に落とす
+  // （sinkMissing。0 や 8 に丸めると「判定できた」ことになってしまう）。
+  roll:r=>{ const R=rollOf(r); return R ? R.roll_level : null; },
+  star3:r=>{ const R=rollOf(r); return (R&&R.three_star)?R.three_star.p_3star:null; },
+  needitem:r=>{ const R=rollOf(r); return (R&&R.items)?R.items.must_count:null; },
   theo:r=>theoTop(UNIT_MAP[r.carryApi]),
   tailwind:r=>r.tailwind, build:r=>r.build.score,
   hard:r=>{ const d=dv(r); return d.missing?null:d.hard; },
@@ -1574,17 +2598,20 @@ function renderRank(m){
     + '</b>。'
     + 'つまりこの並びの大半はコストの並びで、74体を一列にしても'
     + '「高コストが上にいる」しか読めない。<b>コスト帯で絞ってから比べること。</b>'
-    + '<br>理論火力＝BiS（最良の3アイテム）を持たせて '
+    + '<br>理論火力＝理論最適の3アイテムを持たせて '
     + (T.meta.fight_duration || 8) + ' 秒戦ったときの合計ダメージ。'
-    + '相手依存のもの（被弾によるマナ生成・回復・シールド・CC・射線）は入っていない。'
+    + '相手依存のもの（被弾によるマナ生成・回復・シールド・行動妨害・射線）は入っていない。'
     + 'ここで上位に来るのは「強い構成」ではなく「<b>理論火力が出る組み合わせ</b>」。';
-  cap.appendChild(capn);
+  let cc = null;
   if(P && P.conclusion){
-    const cc=el('div','note');
+    cc=el('div','note');
     cc.style.color='var(--warn)';
     cc.textContent='測定結果: '+P.conclusion;
-    cap.appendChild(cc);
   }
+  // 見出しカードを丸ごと畳む。**消していない**（summary に何を畳んだか書く）。
+  cap.appendChild(premise('順位は出さない／並びの大半はコストの並び／'
+    + '理論火力は理論最適の3個で ' + (T.meta.fight_duration || 8) + '秒戦った合計',
+    [capn, cc]));
   m.appendChild(cap);
 
   const sw=el('div','controls');
@@ -1627,12 +2654,12 @@ function drawRankCarry(host){
 
     const cols=[
       {key:'rank',label:'#',num:true},
-      {key:'cost',label:'C',render:u=>costChip(u.cost)},
+      {key:'cost',label:'コスト',render:u=>costChip(u.cost)},
       {key:'name',label:'ユニット',render:u=>{
         const d=el('span'); d.style.cssText='display:inline-flex;align-items:center;gap:7px';
-        d.appendChild(unitIcon(u,24)); d.appendChild(document.createTextNode(u.name));
+        d.appendChild(unitIcon(u,24)); d.appendChild(unitNameNode(u));
         return d;}},
-      {key:'theo',label:'理論火力（BiS '+(T.meta.fight_duration||8)+'秒）',num:true,render:u=>{
+      {key:'theo',label:'理論火力（理論最適 '+(T.meta.fight_duration||8)+'秒）',num:true,render:u=>{
         const b=theoBis(u); const s=el('span',null,String(theoTop(u)));
         if(b) s.title='通常 '+b.auto+' / スキル '+b.ability+' / 継続 '+b.burn
                     + '　攻撃 '+b.attacks+' 回・詠唱 '+b.casts+' 回';
@@ -1640,24 +2667,33 @@ function drawRankCarry(host){
       {key:'per',label:'コスト当たり',num:true,render:u=>Math.round(theoTop(u)/u.cost)},
       {key:'casts',label:'8秒で詠唱',num:true,render:u=>castsCell(u)},
       {key:'backline',label:'後衛到達',render:u=>backlineTag(u)},
-      {key:'items',label:'BiS の3アイテム',wrap:true,render:u=>{
-        const b=theoBis(u); return b ? b.items.join(' / ') : '—';}},
+      {key:'items',label:'理論最適の3アイテム',wrap:true,render:u=>{
+        const b=theoBis(u);
+        if(!b) return '—';
+        const f=document.createDocumentFragment();
+        b.items.forEach(function(n){ const s=el('span','tag',inameOf(n)); s.title=n;
+                                     f.appendChild(s); });
+        return f;}},
     ];
     tbox.innerHTML='';
+    // ★ 行を押すとその駒を軸にした構成へ行く ★
+    // ランキングを見て「こいつ使いたい」と思ったその場が入口。
     tbox.appendChild(mkTable(cols, rows, sort.rankCarry,
       function(k){ if(sort.rankCarry.key===k) sort.rankCarry.dir*=-1;
                    else { sort.rankCarry.key=k; sort.rankCarry.dir=-1; } draw(); },
-      null, null));
+      function(u){ focusUnit(u.apiName); }, null));
 
     const n=el('div','note');
-    n.innerHTML='見出しを押すと並べ替わる。<b>コスト当たり</b>は帯をまたいで比べたいとき用だが、'
+    n.innerHTML='<b>行を押すと、その駒を軸にした構成が出る。</b>'
+      + '見出しを押すと並べ替わる。<b>コスト当たり</b>は帯をまたいで比べたいとき用だが、'
       + 'コストは購入難易度でもあるので「安いほど得」とは限らない。'
       + '<b>「8秒で詠唱 0 回」のユニットはスキル火力が出ていない</b>'
-      + '（BiS にマナアイテムが入っていればその分は入っている）。'
+      + '（理論最適の3個にマナアイテムが入っていればその分は入っている）。'
       + '<br>後衛到達の印は「跳ぶか」ではなく「<b>誰を狙うか</b>」で判定している。'
       + '跳んでも狙う相手が敵の塊なら前衛に着地する。';
     tbox.appendChild(n);
-    tbox.appendChild(backlineGapsNote());
+    tbox.appendChild(premise('後衛到達の判定範囲（未分類の件数を含む）',
+                             [backlineGapsNote()]));
   }
   costSel.onchange=draw;
   draw();
@@ -1672,6 +2708,9 @@ function drawRankComp(host){
   const ctl=el('div','controls');
   const sortSel=el('select');
   [['score','総合（追い風×組みやすさ×派生×ゴールド）'],
+   ['roll','何レベルで回す型か（レベル6→レベル9）'],
+   ['star3','主役★3の到達率が高い順'],
+   ['needitem','アイテムが要る駒が少ない順'],
    ['theo','キャリーの理論火力が高い順'],
    ['tailwind','パッチの追い風が大きい順'],
    ['hard','派生が多い順（潰されにくい）'],
@@ -1681,14 +2720,55 @@ function drawRankComp(host){
    ['crowd','まだ使われていない順']].forEach(function(x){
     sortSel.appendChild(new Option(x[1],x[0]));
   });
+  // 型で絞る。「今日は6リロールがやりたい」から入れるようにする。
+  const rollSel=el('select');
+  rollSel.appendChild(new Option('全部の型',''));
+  [[6,'レベル6 リロール'],[7,'レベル7 リロール'],[8,'レベル8'],[9,'レベル9'],['?','判定できない']]
+    .forEach(function(x){ rollSel.appendChild(new Option(x[1], String(x[0]))); });
+  rollSel.value = rankRollBand;
   // select に無い列（柔軟枠など）で並べ替えたまま戻ってきたときは select を空にしない
   if([...sortSel.options].some(function(o){ return o.value===sort.rankComp.key; }))
     sortSel.value = sort.rankComp.key;
   ctl.appendChild(sortSel);
+  ctl.appendChild(rollSel);
   const cnt=el('span','dim'); ctl.appendChild(cnt);
   host.appendChild(ctl);
 
+  // ★3の到達率をこの表でも出しているので、その前提もこの画面に置く。
+  // rolllevel は前提を構成ごとには持たない（同じ値なので）＝呼ぶ側が1回出す約束。
+  host.appendChild(premise('★3到達率の前提（予算150g・枯れ25%・他者0人。ほとんど未検証）'
+    + '／型は「回すレベル」で盤面の体数とは別', [rollAssumptionsNote()]));
+  // 押した構成の中身（型・コスト分布・★3・アイテム・駒）。表の上に出す。
+  const detail=el('div'); host.appendChild(detail);
   const tbox=el('div'); host.appendChild(tbox);
+
+  function showComp(r){
+    rankCompSel = r.carryApi;
+    detail.innerHTML='';
+    const c=el('div','card');
+    c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
+    const u=UNIT_MAP[r.carryApi];
+    const h=el('h2');
+    h.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap';
+    if(u) h.appendChild(unitIcon(u,26));
+    h.appendChild(document.createTextNode((u?uname(u):unameOf(r.carry))+'（コスト'+r.cost+'）の構成'));
+    if(u) h.appendChild(backlineTag(u));
+    c.appendChild(h);
+    c.appendChild(rollBlock(r));
+    const comp=el('div');
+    comp.style.cssText='display:flex;flex-wrap:wrap;gap:5px;margin:8px 0';
+    (r.units||[]).forEach(function(n,i){
+      const uu=T.units.filter(x=>x.name===n)[0];
+      const sp=unitChip(uu, n);
+      if(i===0){ sp.classList.add('hit'); sp.appendChild(document.createTextNode(' ★')); }
+      comp.appendChild(sp);
+    });
+    c.appendChild(comp);
+    c.appendChild(el('div','note','発動: '+(r.traits||[]).map(tnameOf).join(' / ')));
+    c.appendChild(el('div','note','駒を押すと、その駒を軸にした構成に切り替わる（前衛でも押せる）。'));
+    if(u) c.appendChild(axisButton(u));
+    detail.appendChild(c);
+  }
 
   // 並べ替えの正本は sort.rankComp の1つだけ。select と見出しクリックの両方から
   // ここを書き換える（select を正本にすると、select に無い列で並べ替えた瞬間に
@@ -1704,21 +2784,35 @@ function drawRankComp(host){
   }
 
   function draw(){
-    let rows=sinkMissing(sortRows((F.rows||[]).slice(), sort.rankComp, RCA),
-                         RCA[sort.rankComp.key]);
+    rankRollBand = rollSel.value;
+    let all = (F.rows||[]).slice();
+    if(rankRollBand){
+      all = all.filter(function(r){
+        const R=rollOf(r);
+        const lv = R ? R.roll_level : null;
+        return rankRollBand==='?' ? !lv : String(lv)===rankRollBand;
+      });
+    }
+    let rows=sinkMissing(sortRows(all, sort.rankComp, RCA), RCA[sort.rankComp.key]);
     rows=rows.map(function(r,i){ return Object.assign({}, r, {rank:i+1}); });
     cnt.textContent=rows.length+' 構成';
 
     const cols=[
       {key:'rank',label:'#',num:true},
-      {key:'cost',label:'C',render:r=>costChip(r.cost)},
+      // ★ 一番聞かれていたのがこれ（「何レベルロールなのか分かるようにして」）★
+      // なので # の次、キャリーより前に置く。
+      {key:'roll',label:'型',render:r=>rollBadge(rollOf(r))},
+      {key:'cost',label:'コスト',render:r=>costChip(r.cost)},
       {key:'carry',label:'キャリー',render:r=>{
         const d=el('span'); d.style.cssText='display:inline-flex;align-items:center;gap:6px';
         const u=UNIT_MAP[r.carryApi];
         if(u) d.appendChild(unitIcon(u,22));
-        d.appendChild(document.createTextNode(r.carry));
+        d.appendChild(u ? unitNameNode(u) : document.createTextNode(unameOf(r.carry)));
         if(u) d.appendChild(backlineTag(u,{hideNone:true}));
         return d;}},
+      {key:'dist',label:'コスト分布',render:r=>costDist(rollOf(r))},
+      {key:'star3',label:'主役★3',num:true,render:r=>threeStarCell(rollOf(r))},
+      {key:'needitem',label:'要アイテム',num:true,render:r=>itemNeedCell(rollOf(r))},
       {key:'theo',label:'理論火力',num:true,render:r=>{
         const t=theoTop(UNIT_MAP[r.carryApi]);
         return t==null ? '—' : String(t);}},
@@ -1742,23 +2836,35 @@ function drawRankComp(host){
       {key:'crowd',label:'使用率（中央値比）',num:true,render:r=>
         r.used ? (Math.round(r.crowding*100)+'%') : '—'},
       {key:'score',label:'総合',num:true,render:r=>r.score.toFixed(2)},
-      {key:'traits',label:'発動トレイト',wrap:true,render:r=>(r.traits||[]).join(' / ')},
+      {key:'traits',label:'発動トレイト',wrap:true,
+       render:r=>(r.traits||[]).map(tnameOf).join(' / ')},
     ];
     tbox.innerHTML='';
-    tbox.appendChild(mkTable(cols, rows, sort.rankComp, setKey, null, null));
+    tbox.appendChild(mkTable(cols, rows, sort.rankComp, setKey,
+      function(r){ showComp(r); window.scrollTo(0,0); },
+      function(r){ return r.carryApi===rankCompSel; }));
+    if(rows.length){
+      const cur = rows.filter(function(r){ return r.carryApi===rankCompSel; })[0];
+      showComp(cur || rows[0]);
+    } else { detail.innerHTML=''; }
 
     const n=el('div','note');
-    n.innerHTML='<b>「これとこれを合わせると理論上いちばん火力が出る」までしか言っていない。</b>'
-      + '理論火力はキャリー単体の BiS ダメージで、構成の他の7体・配置・相手は入っていない。'
+    n.innerHTML='<b>行を押すと、その構成の中身（型・コスト分布・★3・要アイテム）が上に出る。</b>'
+      + '<br><b>「これとこれを合わせると理論上いちばん火力が出る」までしか言っていない。</b>'
+      + '理論火力はキャリー単体の理論最適ダメージで、構成の他の7体・配置・相手は入っていない。'
       + '<br><b>使用率が低い × 追い風が大きい × 派生が多い</b> が「まだ誰も使っていないが'
       + '曲げが利く構成」の候補になる。ただし使用率が低い理由が「単に弱い」可能性は'
       + 'このデータでは区別できない。'
       + (((F.rows||[]).some(function(r){ return r.weights_unverified; }))
           ? '<br><span class="wtxt"><b>総合の重みは未検証。</b>総合列より、追い風・派生・ゴールドの生の数字を見ること。</span>'
-          : '');
+          : '')
+      + '<br><b>「型」は何レベルで回すか</b>で、盤面に出す体数（どの構成も8体）とは別物。'
+      + '<b>「主役★3」は構成ごとには変わらない</b> ── 主役のコストとレベルだけで決まるので、'
+      + '同じ型の構成は全部同じ数字になる。';
     tbox.appendChild(n);
   }
   sortSel.onchange=function(){ setKey(sortSel.value); };
+  rollSel.onchange=draw;
   draw();
 }
 
@@ -1813,14 +2919,19 @@ function renderFrontline(m){
     + (nmiss ? ('<br><b class="wtxt">'+nmiss+' 体は初回詠唱が戦闘時間に間に合っていない。</b>'
                + '「初回詠唱」列を見ること。8.2秒のようなギリギリの体は、'
                + '戦闘が少し延びるだけで効くようになる。') : '');
-  m.appendChild(note);
 
   const fact=el('div','note');
-  fact.innerHTML='<b>Set18 で分かったこと</b>: 全74体で<b>物理防御＝魔法防御</b>だった。'
+  fact.innerHTML='<b>このセットで分かったこと</b>: 全74体で<b>物理防御＝魔法防御</b>だった。'
     + 'つまり素の状態では物理・魔法の偏りは作れず、'
     + '<b>偏りはアイテムでしか作れない</b>。相手が物理寄りか魔法寄りかを見て防具を変える、'
     + 'という判断がそのまま効くということ。';
-  m.appendChild(fact);
+  // 畳む。ただし「初回詠唱が間に合っていない体がいる」は畳むと気づけないので
+  // summary に件数を出す。
+  m.appendChild(premise('実効耐久の定義・回復とシールドの扱い'
+    + (nmiss ? '／初回詠唱が間に合っていない '+nmiss+' 体' : '')
+    + '／全74体で物理防御＝魔法防御', [note, fact]));
+  m.appendChild(noteHTML('<b>行を押すと、その壁を軸にした構成が出る。</b>'
+    + '前衛から入っても構成が引けるようにしてある（キャリー前提をやめた）。'));
 
   const box=el('div'); m.appendChild(box);
 
@@ -1841,7 +2952,7 @@ function renderFrontline(m){
     });
     box.innerHTML='';
     const tbl=el('table'), th=el('thead'), tr=el('tr');
-    ['','ユニット','C','実効耐久','回復込み','倍率','体力','防御','軽減率',
+    ['','ユニット','コスト','実効耐久','回復込み','倍率','体力','防御','軽減率',
      '被弾'+d+'で耐える秒','初回詠唱','1コストあたり','防具3個で']
       .forEach(function(x){ const e=el('th',null,x); e.style.cursor='default'; tr.appendChild(e); });
     th.appendChild(tr); tbl.appendChild(th);
@@ -1851,7 +2962,12 @@ function renderFrontline(m){
       const u = UNIT_MAP[r.apiName];
       const row=el('tr');
       const c0=el('td'); if(u) c0.appendChild(unitIcon(u,24)); row.appendChild(c0);
-      row.appendChild(el('td',null,r.name));
+      const cn=el('td'); cn.title=r.name;
+      cn.appendChild(u ? unitNameNode(u) : document.createTextNode(unameOf(r.name)));
+      row.appendChild(cn);
+      // 前衛から構成へ。ここが「前衛も逆引きできる」の入口。
+      if(u){ row.style.cursor='pointer';
+             row.onclick=function(){ focusUnit(u.apiName); }; }
       const cc=el('td'); cc.appendChild(costChip(r.cost)); row.appendChild(cc);
       // 実効耐久は棒でも出す。数字だけだと差が掴みにくい
       const ce=el('td','num');
@@ -1892,7 +3008,7 @@ function renderFrontline(m){
     const w=el('div','tablewrap'); w.appendChild(tbl); box.appendChild(w);
 
     const foot=el('div','note');
-    foot.innerHTML='<b>防具3個で</b>の列は '+(F.armor_set||[]).join(' + ')
+    foot.innerHTML='<b>防具3個で</b>の列は '+(F.armor_set||[]).map(inameOf).join(' + ')
       +' を持たせたときの実効耐久の増分。'
       +'<b>倍率と実数で向きが逆になる</b> ── 倍率は素の防御が低いユニットほど大きく、'
       +'実数は体力が多いユニットほど大きい。'
@@ -1913,29 +3029,62 @@ function renderConstants(m){
   m.appendChild(el('div','note',
     'このツールの計算が依存しているゲーム定数。配信データに入っていないので、'+
     '検証状態を明示している。未検証の定数に依存した数字は、ユニット同士の相対比較には使えるが絶対値は保証されない。'));
+  /* 定数名は Python 側の識別子（STAR_HP_MULT など）。
+     日本語名を CONST_JA から出し、識別子は <code> に落として残す
+     （ソースを grep する手がかりなので消さない）。 */
   m.appendChild(mkTable([
     {key:'verified',label:'状態',render:c=>{
       const b=el('span','badge '+(c.verified?'ok':'warn'), c.verified?'検証済':'未検証'); return b;}},
-    {key:'name',label:'定数'},
-    {key:'value',label:'値',render:c=>String(c.value)},
-    {key:'unit',label:'単位'},
-    {key:'note',label:'なぜ効くか / 出典',wrap:true,render:c=>c.note||c.source},
+    {key:'name',label:'定数',render:c=>{
+      const d=el('span'); d.title=c.name;
+      d.appendChild(document.createTextNode(CONST_JA[c.name] || termLabel(c.name)));
+      const k=el('code'); k.textContent=c.name; k.style.marginLeft='6px';
+      d.appendChild(k);
+      return d;}},
+    {key:'value',label:'値',render:c=>
+      (c.value===true?'はい':c.value===false?'いいえ':String(c.value))},
+    {key:'unit',label:'単位',render:c=>CONST_UNIT_JA[c.unit] || c.unit || '—'},
+    // 注記は開発者向けの文で、ファイル名や項目名がそのまま書いてある。
+    // 文章は日本語にし、識別子は <code> に落とす（訳すと grep できなくなる）。
+    {key:'note',label:'なぜ効くか / 出典',wrap:true,render:c=>devSpan(c.note||c.source||'')},
   ], T.constants.slice().sort((a,b)=>a.verified-b.verified||a.name.localeCompare(b.name)),
     {key:'name',dir:1}, ()=>{}));
 }
 
 /* ================= 構成ソルバー =================
-   指定したキャリーを必ず含み、盤面サイズ以内で、発動するトレイトの価値の合計を
-   最大にするユニットの組み合わせをビーム探索＋局所改善で求める。
+   指定した**軸**（使いたい駒。キャリーとは限らない）を必ず含み、盤面サイズ以内で、
+   発動するトレイトの価値の合計を最大にする組み合わせをビーム探索＋局所改善で求める。
    src/engine/comps.py と同じアルゴリズム。ロジックを変えるときは両方直すこと。
 
    これが出すのは「トレイトの噛み合いが最良の並び」であって「最強の構成」ではない。
    アイテム・配置・引きやすさ・実戦の勝率は入っていない。 */
 const STYLE_VALUE = {1:1.0, 3:2.5, 4:2.0, 5:5.0, 6:8.0};
 const COST_PENALTY = 0.06;
-// キャリーのトレイトが1つも発動していない解への減点。これが無いと
-// 「トレイト合計は強いがキャリーが浮いている」盤面が1位になる。
-const NO_CARRY_TRAIT_PENALTY = 6.0;
+// 軸（使いたい駒）のトレイトが1つも発動していない解への減点。これが無いと
+// 「トレイト合計は強いが軸が浮いている」盤面が1位になる。
+// ★ 名前を CARRY から AXIS に変えた ★ 軸はキャリーとは限らない（前衛でもよい）。
+// 値も式も変えていない ── Python 側（src/engine/comps.py）で前衛31体を軸に
+// 4案を実測した結果、重みを下げると軸のトレイトが1つも点かない解が8体で出た。
+const NO_AXIS_TRAIT_PENALTY = 6.0;
+// 役割から軸の種別を決める表。src/engine/comps.py の AXIS_KIND と同じ8エントリ。
+// Reaper / Specialist を入れないのは、射程1でキャリーをやる駒（Kha'Zix・Master Yi）と
+// 射程5の Caitlyn が同じ箱に入っていて役割名では決まらないため。
+// 表に無ければ射程で最後の判断をし、それでも決まらなければ unknown のまま出す。
+const AXIS_KIND = {
+  ADTank:'front', APTank:'front', ADFighter:'front', APFighter:'front',
+  ADCarry:'back', APCarry:'back', ADCaster:'back', APCaster:'back',
+};
+const AXIS_KIND_LABEL = {front:'前衛（壁）', back:'後衛（撃つ側）', unknown:'どちらとも決めていない'};
+function axisKind(u){
+  if(!u) return 'unknown';
+  const k = AXIS_KIND[u.role];
+  if(k) return k;
+  // Python 側は stats.range をそのまま見ている。ここで rangeHexes に読み替えると
+  // 前衛/後衛の数が食い違うので、同じキーを使う。
+  const rng = u.base ? u.base.range : null;
+  if(rng != null && rng >= 3) return 'back';
+  return 'unknown';
+}
 const baseName = n => (n||'').replace(/\s*\(.*\)$/,'').trim();
 
 const TRAIT_MAP = {};
@@ -1950,22 +3099,49 @@ const UNIT_MAP = {};
 T.units.forEach(u=>UNIT_MAP[u.apiName]=u);
 
 /* ★ オーグメントを取らないと成立しない段 ★
-   配信データの tiers には「オーグメントが要る」という条件が入っていないので、
-   取れていない前提の段を無条件のボーナスとして数えてしまう。
+   src/engine/comps.py の AUGMENT_GATED と同じ明示レジストリ。正本は Python。
+   Set18 の該当は Rival だけ（Rengar と Kha'Zix を併用できるのは
+   オーグメント Unrivaled を取ったとき）。配信データの tiers にこの条件は
+   入っていないので、書かないと「取っていない前提のボーナス」を数えてしまう。
+   既定は「何も取っていない」＝ Python の Solver(data) と同じ。
+   ★ 対戦中タブで取ったオーグメント（liveState.taken）をここへ流し込むかは
+      まだ決めていない ★ 流すと同じ駒でも画面によって解が変わるので、
+      エンジン側（build_app が Solver に何を渡すか）と合わせてから入れる。
+      いまは Python と同じく空のまま。 */
+const AUGMENT_GATED = { 'Rival': [2, 'Unrivaled'] };
+const TAKEN_AUGMENTS = new Set();
 
-   Set18 の該当は Rival だけ:
-     トレイト1段目 "Only active while fielding 1 Rival."
-     オーグメント Unrivaled(Gold) "You can field Rengar and Kha'Zix together
-                                   with **no penalties**"
-     → 「no penalties」＝通常は併用にペナルティがある。
+/* ★ maxUnits を読んでいなかった（2026-09-16 修正）★
+   以前は minUnits<=n の「最後に一致した段」を採るだけで、maxUnits で上限が
+   切られた段を見ていなかった。Python 側（comps.py の tier_for）に合わせてある。
 
-   入れる前は74軸中36件で Rival 2体が選ばれていた（1体は0件）。
-   なお **1段目も style5 / maxUnits=25000** なので「2体以上の段だけ落とす」では
-   1件も変わらない。配信データの maxUnits がその段の本文と矛盾しているので、
-   本文を正としてトレイトごと落とす。
-   src/engine/comps.py の AUGMENT_GATED と同じ規則。**片方だけ直さないこと。** */
-const AUGMENT_GATED = { 'Rival': {at:2, aug:'Unrivaled'} };
-let heldAugments = new Set();
+   同じ人数で複数の段が同時に成立するとき（Set18 では Rival だけ）は
+   **style が高い方**を採る。最後に一致した段を採ると、Rival 1体のときに
+   style1(=1.0) を採って style5(=5.0) の段を捨てていた。
+   採らなかった段は捨てずに持ち回って画面に出す。 */
+function tierFor(t, n){
+  const g = AUGMENT_GATED[t.name];
+  if(g && n >= g[0] && !TAKEN_AUGMENTS.has(g[1]))
+    return {best:null, also:[], gap:false, gated:g[1], gatedAt:g[0]};
+  const matched=[], loose=[];
+  t.tiers.forEach(function(tier){
+    const mu = tier.minUnits;
+    if(mu==null || n < mu) return;
+    loose.push(tier);
+    const xu = tier.maxUnits;
+    if(xu==null || n <= xu) matched.push(tier);
+  });
+  if(matched.length){
+    let best = matched[0];
+    matched.forEach(function(x){
+      const a=[x.style||0, x.minUnits||0], b=[best.style||0, best.minUnits||0];
+      if(a[0]>b[0] || (a[0]===b[0] && a[1]>b[1])) best = x;
+    });
+    return {best:best, also:matched.filter(function(x){ return x!==best; }), gap:false};
+  }
+  if(loose.length) return {best:loose[loose.length-1], also:[], gap:true};
+  return {best:null, also:[], gap:false};
+}
 
 function activated(apis){
   const counts={};
@@ -1974,56 +3150,85 @@ function activated(apis){
   for(const name of Object.keys(counts)){
     const n=counts[name], t=TRAIT_MAP[name];
     if(!t) continue;
-    const g = AUGMENT_GATED[name];
-    if(g && n >= g.at && !heldAugments.has(g.aug)){
-      // オーグメント前提の人数に達した。トレイトごと発動しない。
-      out.push({name:name, count:n, minUnits:null, style:0, gated:g.aug});
-      continue;
+    const r=tierFor(t, n);
+    if(r.best){
+      const rec={name:name, count:n, minUnits:r.best.minUnits,
+                 style:r.best.style, variables:r.best.variables};
+      if(r.also.length) rec.alsoMatching = r.also.map(function(x){
+        return {minUnits:x.minUnits, maxUnits:x.maxUnits, style:x.style}; });
+      if(r.gap) rec.tierGap = true;
+      out.push(rec);
     }
-    let best=null;
-    // 同じ人数で複数の段が成立するときは **style が高い方**を採る。
-    // 従来は「最後に一致した段」だったので、Rival 1体のときに
-    // style1(=1.0) を採って style5(=5.0) を捨てていた。
-    t.tiers.forEach(tier=>{
-      if(tier.minUnits==null || n < tier.minUnits) return;
-      if(tier.maxUnits!=null && n > tier.maxUnits) return;
-      if(!best || (tier.style||0) > (best.style||0)) best=tier;
-    });
-    if(best) out.push({name:name, count:n, minUnits:best.minUnits, style:best.style, variables:best.variables});
+    // ★ オーグメント前提で切った段は「黙って消さない」★
+    // Python は style 0 のまま返すだけなので点数には入らない（そこは同じ）。
+    // 画面から消えると「なぜ Rival が点いていないのか」が分からなくなるので、
+    // 切った理由を持たせて carry 画面で出す。
+    else if(r.gated)
+      out.push({name:name, count:n, minUnits:null, style:0,
+                needs:(t.breakpoints[0]||0)-n, gatedBy:r.gated, gatedAt:r.gatedAt});
     else out.push({name:name, count:n, minUnits:null, style:0, needs:(t.breakpoints[0]||0)-n});
   }
   out.sort((a,b)=>(b.style-a.style)||(b.count-a.count)||a.name.localeCompare(b.name));
   return out;
 }
 
-function scoreOf(apis, carryTraits, carryWeight){
-  let total=0, carryHit=0;
+/* ★ 1体で成立する段の価値の上限 ★
+   その駒を置いた時点で勝手に付いてくるので、構成を組んだ成果ではない。
+   既存の FREE_TRAITS と同じ理屈。
+   これが無いと Rival 1体が style5 = 5.0 になり、**1枠あたり 5.00** という
+   突出した効率になって、Kha'Zix が74構成中73件（99%）に居座る。
+   src/engine/comps.py の ONE_UNIT_TIER_VALUE と同じ値にすること。 */
+const ONE_UNIT_TIER_VALUE = 1.0;
+
+/* ★ 段に捧げた枠数で価値を割り増す指数 ★
+   style は「色の階級」であって強さではない。そのまま使うと
+   「枠を多く使う段ほど1枠あたりが安い」ことになる:
+       Rival 1体 5.00/枠 … Riftbeast 7体 0.71/枠
+   結果、ソルバーは必ず「2体で成立する安いトレイトを数多く集める」形に倒れ、
+   Riftbeast 5/7 や Defender 6 のような深い段が一度も組まれない。
+   値 0.6 はユーザーの構成に当てはめたのではなく、**トレイト自身の配信数値**
+   （段が上がると変数がどれだけ伸びるか）を18トレイトで回帰して決めた（誤差最小）。
+   src/engine/comps.py の TIER_COMMITMENT_EXP と同じ値にすること。 */
+const TIER_COMMITMENT_EXP = 0.6;
+
+function scoreOf(apis, axisTraits, axisWeight){
+  let total=0, axisHit=0;
   activated(apis).forEach(a=>{
     if(!a.style) return;
     if(FREE_TRAITS.has(a.name)) return;   // 選択の余地が無い
     let v=STYLE_VALUE[a.style]||1;
-    if(carryTraits.has(a.name)){ v*=carryWeight; carryHit++; }
+    // 1体で点く段は構成の成果ではないので据え置く
+    if((a.minUnits||0) <= 1) v = Math.min(v, ONE_UNIT_TIER_VALUE);
+    // 枠を多く捧げた段ほど価値を伸ばす
+    const mu = a.minUnits || 1;
+    if(mu > 1) v *= Math.pow(mu, TIER_COMMITMENT_EXP);
+    if(axisTraits.has(a.name)){ v*=axisWeight; axisHit++; }
     total+=v;
   });
   apis.forEach(a=>{ total-=COST_PENALTY*UNIT_MAP[a].cost; });
-  if(!carryHit) total-=NO_CARRY_TRAIT_PENALTY;
+  if(!axisHit) total-=NO_AXIS_TRAIT_PENALTY;
   return total;
 }
 
-function solve(carryApi, size, opts){
+/* 軸（使いたい駒）を必ず含む構成を上位 top 件返す。
+   ★ 第1引数はキャリーではなく「軸」★ 前衛でも後衛でも扱いは同じ。
+   位置引数の呼び出しは無改修で動く（Python 側と同じ扱い）。
+   opts.axisWeight（旧 carryWeight）・NO_AXIS_TRAIT_PENALTY に名前を合わせてある。 */
+function solve(axisApi, size, opts){
   opts=opts||{};
-  const beam=opts.beam||240, top=opts.top||3, carryWeight=opts.carryWeight||2.0;
+  const beam=opts.beam||240, top=opts.top||3;
+  const axisWeight=opts.axisWeight||opts.carryWeight||2.0;
   const banned=new Set(opts.exclude||[]);
   const must=new Set(opts.must||[]);
-  const carry=UNIT_MAP[carryApi];
-  const carryTraits=new Set(carry.traits);
+  const axis=UNIT_MAP[axisApi];
+  const axisTraits=new Set(axis.traits);
   const pool=T.units.filter(u=>!banned.has(u.apiName));
   function conflicts(apis,cand){
     const bn=baseName(cand.name);
     for(let i=0;i<apis.length;i++) if(baseName(UNIT_MAP[apis[i]].name)===bn) return true;
     return false;
   }
-  let seed=[carryApi];
+  let seed=[axisApi];
   must.forEach(x=>{ if(seed.indexOf(x)<0) seed.push(x); });
   if(seed.length>size) return [];
   let states=[seed.slice().sort()];
@@ -2034,25 +3239,90 @@ function solve(carryApi, size, opts){
         if(st.indexOf(cand.apiName)>=0||conflicts(st,cand)) continue;
         const ns=st.concat([cand.apiName]).sort();
         const key=ns.join('|');
-        if(!nxt.has(key)) nxt.set(key,{arr:ns,s:scoreOf(ns,carryTraits,carryWeight)});
+        if(!nxt.has(key)) nxt.set(key,{arr:ns,s:scoreOf(ns,axisTraits,axisWeight)});
       }
     }
     if(!nxt.size) break;
     states=Array.from(nxt.values()).sort((a,b)=>b.s-a.s).slice(0,beam).map(x=>x.arr);
   }
+  /* ★ ビームは深い段に辿り着けない ★
+     1体ずつ足して途中経過のスコアで刈るので、6体目で初めて点く段は
+     5体目までスコアに現れず、そこへ行く枝が先に刈られる。
+     実測では74軸中24軸で、手で組んだ6/7体段の構成のほうが
+     solve() の答えより中央値 +14.8% 高かった（最大 +51%）。
+     ビームと逆向きに「先に段を満たしてから残りを貪欲に埋める」出発点を作り、
+     局所改善の種に足す。src/engine/comps.py の _tier_seeds と同じ。 */
+  const SEED_MIN_UNITS = 4, SEED_KEEP = 12;
+  function tierSeeds(){
+    const fixed = [axisApi].concat(Array.from(must));
+    const byTrait = {};
+    pool.forEach(function(c){
+      (c.traits||[]).forEach(function(t){
+        (byTrait[t] = byTrait[t] || []).push(c); });
+    });
+    const out = [];
+    Object.keys(TRAIT_MAP).forEach(function(tname){
+      // 安いユニットから入れる。同じ段を満たすなら合計コストが低いほうが得。
+      const members = (byTrait[tname]||[]).slice()
+        .sort(function(a,b){ return a.cost - b.cost; });
+      if(!members.length) return;
+      (TRAIT_MAP[tname].tiers||[]).forEach(function(tier){
+        const k = tier.minUnits;
+        if(!k || k < SEED_MIN_UNITS || k > size) return;
+        let cur = fixed.slice();
+        let have = cur.filter(function(a){
+          return (UNIT_MAP[a].traits||[]).indexOf(tname) >= 0; }).length;
+        for(let i=0; i<members.length; i++){
+          if(have >= k || cur.length >= size) break;
+          const a = members[i].apiName;
+          if(cur.indexOf(a) >= 0 || conflicts(cur, members[i])) continue;
+          cur.push(a); have++;
+        }
+        if(have < k) return;   // 人数が足りない段
+        while(cur.length < size){
+          let best=null, bestS=null;
+          for(let i=0; i<pool.length; i++){
+            const c = pool[i], a = c.apiName;
+            if(cur.indexOf(a) >= 0 || conflicts(cur, c)) continue;
+            const sc = scoreOf(cur.concat([a]).sort(), axisTraits, axisWeight);
+            if(bestS === null || sc > bestS){ best = a; bestS = sc; }
+          }
+          if(best === null) break;
+          cur.push(best);
+        }
+        if(cur.length === size) out.push(cur.slice().sort());
+      });
+    });
+    const seen = {}, uniq = [];
+    out.forEach(function(st){
+      const key = st.join('|');
+      if(seen[key]) return;
+      seen[key] = 1;
+      uniq.push({arr: st, s: scoreOf(st, axisTraits, axisWeight)});
+    });
+    uniq.sort(function(a,b){ return b.s - a.s; });
+    return uniq.slice(0, SEED_KEEP).map(function(x){ return x.arr; });
+  }
+
+  const starts = states.slice(0, top*4);
+  tierSeeds().forEach(function(sd){
+    const key = sd.join('|');
+    if(!starts.some(function(x){ return x.join('|') === key; })) starts.push(sd);
+  });
+
   const results=[];
-  for(const st of states.slice(0, top*4)){
-    let cur=st.slice(), curS=scoreOf(cur,carryTraits,carryWeight), improved=true, rounds=0;
+  for(const st of starts){
+    let cur=st.slice(), curS=scoreOf(cur,axisTraits,axisWeight), improved=true, rounds=0;
     while(improved && rounds<12){
       improved=false; rounds++;
       for(const outA of cur.slice()){
-        if(outA===carryApi||must.has(outA)) continue;
+        if(outA===axisApi||must.has(outA)) continue;
         const rest=cur.filter(x=>x!==outA);
         let done=false;
         for(const cand of pool){
           if(rest.indexOf(cand.apiName)>=0||conflicts(rest,cand)) continue;
           const ns=rest.concat([cand.apiName]).sort();
-          const s=scoreOf(ns,carryTraits,carryWeight);
+          const s=scoreOf(ns,axisTraits,axisWeight);
           if(s>curS+1e-9){ cur=ns; curS=s; improved=true; done=true; break; }
         }
         if(done) break;
@@ -2073,7 +3343,15 @@ function solve(carryApi, size, opts){
       totalCost:r.arr.reduce((s,a)=>s+UNIT_MAP[a].cost,0),
       active:acts.filter(a=>a.style),
       dead:acts.filter(a=>!a.style && a.needs>0 && a.needs<=2),
-      carryApi:carryApi
+      gated:acts.filter(a=>a.gatedBy),
+      // carry / carryApi は互換のため残す。中身は軸。
+      carryApi:axisApi,
+      carry:axis.name,
+      axis:axis.name,
+      axisApi:axisApi,
+      axisKind:axisKind(axis),
+      axisTraits:axis.traits.length,
+      axisTraitsHit:acts.filter(a=>a.style && axisTraits.has(a.name)).length
     });
     if(best.length>=top) break;
   }
@@ -2096,7 +3374,7 @@ function itemCard(unit){
   const c = el('div','card');
   c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
   const sc = (unit.ability && unit.ability.scaling) || {kind:'?', scales:[]};
-  c.appendChild(el('h2',null,'理想アイテム — '+unit.name));
+  c.appendChild(el('h2',null,'理想アイテム — '+uname(unit)));
 
   const dur = (T.meta && T.meta.fight_duration) || 8;
   const manaPer = unit.role && /Caster$/.test(unit.role) ? '7'
@@ -2104,12 +3382,14 @@ function itemCard(unit){
   const sub = el('div','note');
   sub.innerHTML =
     '<b>'+dur+'秒の戦闘で出る合計ダメージ</b>で順位付けしている。'
-    + '瞬間DPSでは積み上げ系（Guinsoo / Archangel&#39;s / Kraken&#39;s / Titan&#39;s）を'
+    + '瞬間の秒間ダメージでは積み上げ系（' + inameOf("Guinsoo's Rageblade") + ' / '
+    + inameOf("Archangel's Staff") + ' / ' + inameOf("Kraken's Fury") + ' / '
+    + inameOf("Titan's Resolve") + '）を'
     + '表現できないため。戦闘時間は実測メタとの一致が最大になる点を探して決めた'
     + '（6秒19% / <b>8秒27%</b> / 12秒20% / 30秒17%）。<br>'
-    + 'スキル: <b>'+(sc.kind||'不明')+'型</b>'
-    + (sc.scales&&sc.scales.length ? '（参照: '+sc.scales.join(' / ')+'）' : '')
-    + '　ロール <b>'+(unit.role||'不明')+'</b>（通常攻撃1回のマナ '+manaPer+'）';
+    + 'スキル: <b>'+scaleJa(sc.kind||'不明')+'型</b>'
+    + (sc.scales&&sc.scales.length ? '（参照: '+sc.scales.map(scaleJa).join(' / ')+'）' : '')
+    + '　ロール <b>'+roleJa(unit.role)+'</b>（通常攻撃1回のマナ '+manaPer+'）';
   c.appendChild(sub);
 
   if(bisNeverCast(unit)){
@@ -2127,7 +3407,7 @@ function itemCard(unit){
     w.style.cssText='background:#3a3018;border-radius:6px;padding:8px;color:#f0d29a';
     w.innerHTML='<b>注意: このユニットは1回の詠唱で複数回当たる。</b>'
       +'配信データの数値は「1発あたり」で、発数は取得できていない'
-      +'（Riot の説明文で @Num…@ のまま）。したがって'
+      +'（Riot の説明文で変数名のまま配信されている）。したがって'
       +'<b>スキルダメージは下限値</b>で、下の順位は通常攻撃に偏っている。'
       +'このユニットのアイテム推奨は当てにしないこと。';
     c.appendChild(w);
@@ -2141,7 +3421,7 @@ function itemCard(unit){
   }
 
   const tbl=el('table'), th=el('thead'), tr=el('tr');
-  ['#','アイテム3個','合計ダメージ','実測の平均順位','通常','スキル','継続','攻撃/詠唱','HP','AD','AP','攻撃速度','クリ率']
+  ['#','アイテム3個','合計ダメージ','実測の平均順位','通常','スキル','継続','攻撃/詠唱','体力','攻撃力','魔力','攻撃速度','クリ率']
     .forEach(x=>{const e=el('th',null,x); e.style.cursor='default'; tr.appendChild(e);});
   th.appendChild(tr); tbl.appendChild(th);
   const tb=el('tbody');
@@ -2149,14 +3429,15 @@ function itemCard(unit){
     const row=el('tr');
     row.appendChild(el('td','num',String(i+1)));
     const c2=el('td','wrap');
-    b.items.forEach(function(n){ c2.appendChild(el('span','tag',n)); });
+    b.items.forEach(function(n){ const s=el('span','tag',inameOf(n)); s.title=n;
+                                 c2.appendChild(s); });
     row.appendChild(c2);
     const tot=el('td','num',b.total.toLocaleString());
     if(i===0) tot.style.color='var(--ok)';
     row.appendChild(tot);
     const mp=el('td','num', b.measured_place ? b.measured_place+'位' : '—');
     if(b.measured_place){
-      mp.title = 'op.gg の実測 '+(b.measured_n||0).toLocaleString()+' 試合 / Top4率 '
+      mp.title = 'op.gg の実測 '+(b.measured_n||0).toLocaleString()+' 試合 / 上位4位率 '
         + Math.round((b.measured_top4||0)*100)+'%';
       if(b.measured_place < 4.0) mp.style.color='var(--ok)';
       else if(b.measured_place > 4.4) mp.style.color='var(--bad)';
@@ -2181,12 +3462,16 @@ function itemCard(unit){
     '「実測の平均順位」は op.gg の集計値（理論値とは別の根拠）。'
       + '数字が小さいほど良い。— は実測で十分な試合数が無い組み合わせ。'
       + '理論1位に実測の裏付けがあるかを、その場で確かめられるようにしてある。',
-    '相手は物理防御50 / 魔法防御50 / HP2000 と仮定。Sunder・Shred は相手の防御を削る形で入っている。',
-    'モデル化した積み上げ: 攻撃速度/秒（Guinsoo・Quicksilver）、AP/間隔（Archangel の杖）、'
-      + 'AD/攻撃（Kraken・Titan）、クリでの増幅（Striker）、継続ダメージ（Red Buff 等）。',
+    '相手は物理防御50 / 魔法防御50 / 体力2000 と仮定。'
+      + '物理防御低下・魔法防御低下は相手の防御を削る形で入っている。',
+    'モデル化した積み上げ: 毎秒の攻撃速度（' + inameOf("Guinsoo's Rageblade") + '・'
+      + inameOf('Quicksilver') + '）、詠唱ごとの魔力（' + inameOf("Archangel's Staff") + '）、'
+      + '攻撃ごとの攻撃力（' + inameOf("Kraken's Fury") + '・' + inameOf("Titan's Resolve") + '）、'
+      + 'クリティカルでの増幅（' + inameOf("Striker's Flail") + '）、'
+      + '継続ダメージ（' + inameOf('Red Buff') + ' 等）。',
   ];
-  if(un.length) notes.push('未モデル: '+un.join(' / '));
-  notes.push('相手の行動・CC・配置・味方のバフは入っていない。単騎で殴り続けた場合の合計。');
+  if(un.length) notes.push('未モデル: '+un.map(jp).join(' / '));
+  notes.push('相手の行動・行動妨害・配置・味方のバフは入っていない。単騎で殴り続けた場合の合計。');
   notes.forEach(function(t){ c.appendChild(el('div','note',t)); });
   return c;
 }
@@ -2289,7 +3574,7 @@ function renderEcon(m){
   unitSel.appendChild(new Option('ユニットを選ぶ（コスト帯だけでも可）',''));
   T.units.slice().filter(u=>u.purchasable!==false)
     .sort((a,b)=>b.cost-a.cost||a.name.localeCompare(b.name))
-    .forEach(u=>unitSel.appendChild(new Option(u.name+' (c'+u.cost+')', u.apiName)));
+    .forEach(u=>unitSel.appendChild(new Option(optName(u), u.apiName)));
   const costSel = el('select');
   [1,2,3,4,5].forEach(c=>costSel.appendChild(new Option(c+' コスト', c)));
   costSel.value = 4;
@@ -2317,8 +3602,9 @@ function renderEcon(m){
   note.innerHTML = 'ショップ確率表とプール枚数は <b>Riot のマップデータから取った実値</b>。'+
     '一方「他プレイヤーの保有枚数」と「コスト帯の枯れ具合」は推測しか入らず、'+
     '<b>この2つが結果を大きく動かす</b>。枯れを 0% から 50% に変えると、'+
-    'Lv8・50g の 4コスト2★到達率は 43.5% から 86.8% まで動く。';
-  m.appendChild(note);
+    'レベル8・50ゴールドの 4コスト2★到達率は 43.5% から 86.8% まで動く。';
+  m.appendChild(premise('確率表とプールは Riot の実値／他者保有と枯れは推測（結果を大きく動かす）',
+                        [note]));
 
   const box = el('div'); m.appendChild(box);
 
@@ -2326,7 +3612,7 @@ function renderEcon(m){
     const api = unitSel.value;
     let tier = parseInt(costSel.value,10);
     let unitName = null;
-    if(api){ const u=UNIT_MAP[api]; tier=u.cost; costSel.value=String(tier); unitName=u.name; }
+    if(api){ const u=UNIT_MAP[api]; tier=u.cost; costSel.value=String(tier); unitName=uname(u); }
     // ★ `|| 50` は 0 を falsy として弾いていた ★
     // リロールはリアルタイムに使うタブなので、所持金 0 と入れるのは
     // 「今リロールできるか」を見たい普通の操作。それに 50g の答えを
@@ -2343,13 +3629,13 @@ function renderEcon(m){
 
     box.innerHTML='';
     const c=el('div','card'); c.style.position='static'; c.style.maxHeight='none';
-    c.appendChild(el('h2',null,(unitName?unitName+' を':tier+'コストを')+' '+gold+'g で狙う'));
+    c.appendChild(el('h2',null,(unitName?unitName+' を':tier+'コストを')+' '+gold+'ゴールドで狙う'));
     // リロールは2g。それ未満なら回数0なので、確率表を出す意味がない。
     // 黙って2gに切り上げると「0gでも引ける」ように見えてしまう。
     if(gold < 2){
       const w=el('div','note');
-      w.innerHTML = '<b class="wtxt">'+gold+'g ではリロールできない。</b>'
-        + 'リロールは1回2g。所持金が2g未満のときに引ける枚数は0枚で、'
+      w.innerHTML = '<b class="wtxt">'+gold+'ゴールドではリロールできない。</b>'
+        + 'リロールは1回2ゴールド。所持金が2ゴールド未満のときに引ける枚数は0枚で、'
         + '出現率の表を出しても答えにならない。'
         + '<br>知りたいのが「次のターンまでに何g貯まるか」なら経済タブを見ること。';
       c.appendChild(w);
@@ -2358,16 +3644,16 @@ function renderEcon(m){
     }
     if(goldBlank){
       const w=el('div','note');
-      w.innerHTML='ゴールド欄が空なので既定の <b>50g</b> で計算している。';
+      w.innerHTML='ゴールド欄が空なので既定の <b>50ゴールド</b> で計算している。';
       c.appendChild(w);
     }
     c.appendChild(el('div','note',
       tier+'コストのプール: '+p.per_unit+'枚 × '+p.unit_count+'種 = '+p.total+'枚　/　'+
-      gold+'g = '+Math.floor(gold/2)*5+' スロット（2gで5枠）　/　'+
+      gold+'ゴールド = '+Math.floor(gold/2)*5+' スロット（2ゴールドで5枠）　/　'+
       '前提: 保有'+owned+'枚・他者'+cont+'枚・枯れ'+Math.round(drain*100)+'%'));
 
     const tbl=el('table'), th=el('thead'), htr=el('tr');
-    ['Lv','このコストの出現率','期待枚数','1枚以上','2★到達(3枚)','3★到達(9枚)']
+    ['レベル','このコストの出現率','期待枚数','1枚以上','2★到達(3枚)','3★到達(9枚)']
       .forEach(x=>{const e=el('th',null,x); e.style.cursor='default'; htr.appendChild(e);});
     th.appendChild(htr); tbl.appendChild(th);
     const tb=el('tbody');
@@ -2395,9 +3681,9 @@ function renderEcon(m){
 
     // XP と収入
     const x=el('div'); x.style.marginTop='12px';
-    x.appendChild(el('b',null,'レベルアップに必要なXP（購入は4gで4XP）'));
+    x.appendChild(el('b',null,'レベルアップに必要な経験値（購入は4ゴールドで4経験値）'));
     const xt=el('table'), xtb=el('tbody'), xth=el('thead'), xhtr=el('tr');
-    ['→Lv','必要XP','購入だけで上げる場合のゴールド'].forEach(v=>{
+    ['→レベル','必要な経験値','購入だけで上げる場合のゴールド'].forEach(v=>{
       const e=el('th',null,v); e.style.cursor='default'; xhtr.appendChild(e);});
     xth.appendChild(xhtr); xt.appendChild(xth);
     Object.keys(econ.xp.to_next_level).map(Number).sort((a,b)=>a-b).forEach(lv=>{
@@ -2410,7 +3696,7 @@ function renderEcon(m){
     });
     xt.appendChild(xtb);
     const xw=el('div','tablewrap'); xw.appendChild(xt); x.appendChild(xw);
-    x.appendChild(el('div','note','XP表はゲームデータに無くサーバ側定数。公式パッチノートが唯一の一次ソース。'));
+    x.appendChild(el('div','note','経験値表はゲームデータに無くサーバ側の定数。公式パッチノートが唯一の一次ソース。'));
     c.appendChild(x);
 
     // 連勝ボーナス
@@ -2422,7 +3708,7 @@ function renderEcon(m){
         const parts=econ.streaks[k].map(t=>{
           const rng = t.max==null ? (t.min+'連以上')
             : (t.min===t.max ? t.min+'連' : t.min+'〜'+t.max+'連');
-          return rng+' = +'+t.gold+'g';
+          return rng+' = +'+t.gold+'ゴールド';
         });
         sb.appendChild(el('div','note',label+'： '+parts.join(' / ')));
       });
@@ -2475,7 +3761,8 @@ function unitIcon(unit, px){
     + 'border:1px solid '+(COST_COLOR[unit.cost]||'var(--line)')+';background:var(--panel2)';
   wrap.title = unit.name;
   const fallback = () => {
-    wrap.textContent = (unit.name||'?').slice(0,1);
+    // 画像が出ないときの頭文字も日本語名から取る（英語名の頭文字を出さない）
+    wrap.textContent = (unit.name_ja || unit.name || '?').slice(0,1);
     wrap.style.display = 'inline-flex';
     wrap.style.alignItems = 'center';
     wrap.style.justifyContent = 'center';
@@ -2740,7 +4027,7 @@ function renderBoard(m){
   const ctl=el('div','controls');
   const sel=el('select');
   T.units.slice().sort((a,b)=>b.cost-a.cost||a.name.localeCompare(b.name))
-    .forEach(u=>sel.appendChild(new Option(u.name+' (c'+u.cost+') 射程'+(u.base.range||1), u.apiName)));
+    .forEach(u=>sel.appendChild(new Option(optName(u)+' 射程'+(u.base.range||1), u.apiName)));
   sel.value = (boardState && boardState.carryApi) || carrySel ||
               T.units.slice().sort((a,b)=>b.stars['2'].auto_dps-a.stars['2'].auto_dps)[0].apiName;
   const size=el('select');
@@ -2750,7 +4037,7 @@ function renderBoard(m){
   const foeSel=el('select');
   foeSel.appendChild(new Option('相手キャリー: 未指定',''));
   T.units.slice().sort((a,b)=>b.cost-a.cost||a.name.localeCompare(b.name))
-    .forEach(u=>foeSel.appendChild(new Option('相手 '+u.name+' 射程'+(u.base.range||1)
+    .forEach(u=>foeSel.appendChild(new Option('相手 '+uname(u)+' 射程'+(u.base.range||1)
       +(u.leap_hexes?('・跳躍'+u.leap_hexes):''), u.apiName)));
 
   const mode=el('select');
@@ -2768,11 +4055,16 @@ function renderBoard(m){
     +'相手キャリーはユニットを選んでから置く（射程と跳躍半径が計算に要る）。'
     +'前衛はヘクスだけでよい。<br>'
     +'相手を1体も置かなければ「同じ構成の180°回転」を基準線として使う。'
-    +'相手構成は手入力する設計 ── Riot のポリシーが対戦中に相手盤面を自動で読むこと'
-    +'（Scouting）を禁じているため（docs/03 §5）。'
+    +'相手構成は手入力する設計 ── Riot のポリシーが対戦中に相手盤面を自動で読むことを'
+    +'禁じているため（<code>docs/03</code> §5）。'
     +'同距離のタイブレークは未解明なので確率で割っている。'
-    +'移動 '+SECONDS_PER_HEX+'秒/ヘクスは Riot の換算表（240単位/ヘクス）÷移動速度500 から導いた値。';
-  m.appendChild(note);
+    +'移動 '+SECONDS_PER_HEX+'秒/マスは Riot の換算表（240単位/マス）÷移動速度500 から導いた値。';
+  // 操作の説明だけは畳まない。畳むと「クリックして相手を置く」ことに気づけない。
+  m.appendChild(noteHTML('<b>敵陣（上4行）をクリックして相手を置くと、'
+    + 'それに合わせた自分の初期配置を出す。</b>'
+    + '相手キャリーはユニットを選んでから置く（射程と跳躍半径が計算に要る）。'));
+  m.appendChild(premise('幾何の計算だけで勝敗もダメージも出さない／相手構成は手入力'
+    + '／同距離のタイブレークは未解明', [note]));
 
   const box=el('div'); m.appendChild(box);
 
@@ -2793,7 +4085,7 @@ function renderBoard(m){
     const f = boardState.foe, out=[];
     if(f.carryHex){
       const u = UNIT_MAP[f.carryApi];
-      out.push({name: u ? ('相手'+u.name) : '相手キャリー', side:'enemy', role:'carry',
+      out.push({name: u ? ('相手'+uname(u)) : '相手キャリー', side:'enemy', role:'carry',
                 hex:f.carryHex, range: u ? (u.base.range||1) : 4,
                 leap_hexes: u ? (u.leap_hexes||null) : null});
     }
@@ -2832,7 +4124,7 @@ function renderBoard(m){
     const baseline = foes.length === 0;
     let units = own.slice();
     if(baseline){
-      own.forEach(u=>units.push({name:'敵'+u.name, range:u.range, cost:u.cost,
+      own.forEach(u=>units.push({name:'敵'+unameOf(u.name), range:u.range, cost:u.cost,
                                  side:'enemy', hex:mirrorHex(u.hex)}));
     } else {
       units = units.concat(foes);
@@ -2856,7 +4148,7 @@ function renderBoard(m){
         const fo=byHexFoe[k], mine=byHexOwn[k];
         if(fo){
           cell.style.background='#4a2230'; cell.style.color='#ffb3c1';
-          cell.title=fo.name+(fo.range?('  射程'+fo.range):'');
+          cell.title=unameOf(fo.name)+(fo.range?('  射程'+fo.range):'');
           // 相手キャリーはユニットを選んで置くので絵が出せる。前衛は名前を取らないので文字
           const fu = fo.role==='carry' ? UNIT_MAP[boardState.foe.carryApi] : null;
           if(fu){ cell.appendChild(unitIcon(fu, 34));
@@ -2865,7 +4157,7 @@ function renderBoard(m){
           else cell.textContent=fo.role==='carry'?'★敵':'敵';
         } else if(mine){
           cell.style.background=mine.isCarry?'var(--accent)':'var(--panel2)';
-          cell.title=mine.name+'  射程'+(mine.range||1);
+          cell.title=unameOf(mine.name)+'  射程'+(mine.range||1);
           const mu = UNIT_MAP[mine.apiName];
           if(mu){
             cell.appendChild(unitIcon(mu, mine.isCarry?36:32));
@@ -2874,7 +4166,7 @@ function renderBoard(m){
               b.style.cssText='font-size:10px;line-height:1;color:#0b0f14'; cell.appendChild(b);
             }
           } else {
-            cell.textContent=mine.isCarry?('★'+mine.name):mine.name;
+            cell.textContent=(mine.isCarry?'★':'')+unameOf(mine.name);
             if(mine.isCarry) cell.style.color='#0b0f14';
           }
         }
@@ -2965,7 +4257,7 @@ function renderBoard(m){
       rl.appendChild(el('b',null,'なぜそこに置くか'));
       boardState.reasons.forEach(x=>{
         const d=el('div','note');
-        d.innerHTML=(x.isCarry?'<b>★'+x.unit+'</b>':x.unit)
+        d.innerHTML=(x.isCarry?'<b>★'+unameOf(x.unit)+'</b>':unameOf(x.unit))
           +' <span class="dim">('+x.hex[0]+','+x.hex[1]+')</span> — '+x.why;
         rl.appendChild(d);
       });
@@ -3002,7 +4294,7 @@ function traitBonusCard(unit){
   const tb = unit.trait_bonus;
   const c = el('div','card');
   c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
-  c.appendChild(el('h2',null,'トレイト補正 — '+unit.name));
+  c.appendChild(el('h2',null,'トレイト補正 — '+uname(unit)));
   if(!tb){
     c.appendChild(el('div','note','このユニット向けの構成が組めなかったので、'
       +'理論値はトレイト補正なし（素の状態）で出している。'));
@@ -3013,13 +4305,16 @@ function traitBonusCard(unit){
   head.innerHTML = 'この画面の理論ダメージは、下の構成でこのユニットに乗るトレイト補正を'
     + '<b>適用済み</b>の数字。キャリーが単騎で戦うことは実戦では無いので、'
     + '素の値で比べても意味が薄い。<br>前提の構成： '
-    + tb.comp.map(function(n){ return n===unit.name ? '<b>'+n+' ★</b>' : n; }).join(' / ');
+    + tb.comp.map(function(n){ return n===unit.name ? '<b>'+unameOf(n)+' ★</b>'
+                                                   : unameOf(n); }).join(' / ');
   c.appendChild(head);
 
   const act = el('div'); act.style.margin='8px 0';
   act.appendChild(el('span','dim','発動： '));
   (tb.active||[]).forEach(function(a){
-    act.appendChild(el('span','tag hit', a.name+' ('+a.minUnits+')'));
+    const s=el('span','tag hit', tnameOf(a.name)+' ('+a.minUnits+')');
+    s.title=a.name;
+    act.appendChild(s);
   });
   c.appendChild(act);
 
@@ -3044,7 +4339,7 @@ function traitBonusCard(unit){
       // （src/engine/traits.py が 30.0 のまま渡し、受け取る combat.py 側で /100 している）。
       // frac の式をそのまま使い回していたので、唯一 pct_pt を持つ Kog'Maw の
       // shred_sunder が「+3000pt」と出ていた。正しくは +30pt。
-      else if(m[0]==='pct_pt') v = '+'+Math.round(o[k]*10)/10+'pt';
+      else if(m[0]==='pct_pt') v = '+'+Math.round(o[k]*10)/10+'ポイント';
       else v = '+'+fmt(o[k]);
       const sp = el('span','tag hit', (LBL[k]||k)+' '+v);
       sp.style.fontSize='13px';
@@ -3064,7 +4359,8 @@ function traitBonusCard(unit){
     if(note) c.appendChild(el('div','note',note));
     const ul = el('div','note');
     ul.innerHTML = arr.map(function(x){
-      return '・'+String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+      // Python 側の文。駒名・トレイト名・配信データの変数名を日本語にする
+      return '・'+devHtml(String(x));
     }).join('<br>');
     c.appendChild(ul);
   }
@@ -3090,12 +4386,13 @@ function traitBonusCard(unit){
     sm.style.cssText='cursor:pointer;color:var(--dim);font-size:12px;margin-top:10px';
     d.appendChild(sm);
     const ul = el('div','note');
-    ul.innerHTML = tb.skipped.map(function(x){ return '・'+x; }).join('<br>');
+    ul.innerHTML = tb.skipped.map(function(x){ return '・'+devHtml(String(x)); }).join('<br>');
     d.appendChild(ul);
     c.appendChild(d);
   }
 
-  c.appendChild(el('div','note',
+  // ファイル名と識別子は <code> に落とす（文章ではなく場所の指示なので訳さない）
+  c.appendChild(devNote(
     '分類は src/engine/traits.py の VARS に1変数ずつ登録してある。'
     + 'セットデータ側の全変数に登録があることをテストで検査しているので、'
     + '新しいパッチで変数が増えたら「意味を特定できていない」に出る。'));
@@ -3110,7 +4407,7 @@ function traitBonusCard(unit){
 function placeCard(unit){
   const c = el('div','card');
   c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
-  c.appendChild(el('h2',null,'予想順位 — '+unit.name));
+  c.appendChild(el('h2',null,'予想順位 — '+uname(unit)));
   const P = T.meta && T.meta.predict;
   if(unit.expected_place==null){
     c.appendChild(el('div','note','このユニットは予想順位を出せていない。'
@@ -3177,7 +4474,7 @@ function measuredCard(unit){
   const M = T.meta_stats && T.meta_stats.units && T.meta_stats.units[unit.apiName];
   const c = el('div','card');
   c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
-  c.appendChild(el('h2',null,'実測メタ — '+unit.name));
+  c.appendChild(el('h2',null,'実測メタ — '+uname(unit)));
   if(!M){
     c.appendChild(el('div','note','このユニットの実測データが取れていない。'
       +' <code>python src/opgg.py --meta</code> を実行すると取得する。'));
@@ -3187,7 +4484,7 @@ function measuredCard(unit){
   const sub = el('div','note');
   sub.innerHTML = '出典 <b>'+(T.meta_stats.source||'op.gg')+'</b>。'
     + (o.totalCount ? ' 全体 '+o.totalCount.toLocaleString()+' 試合：平均順位 <b>'+o.avgPlacement
-       +'</b> / Top4率 '+Math.round((o.top4Rate||0)*100)+'% / 1位率 '+Math.round((o.winRate||0)*100)+'%' : '')
+       +'</b> / 上位4位率 '+Math.round((o.top4Rate||0)*100)+'% / 1位率 '+Math.round((o.winRate||0)*100)+'%' : '')
     + '<br><b>平均順位が良い＝最強ではない。</b>'
     + '難易度バイアス・コンテスト・ランク帯バイアスが乗っている（docs/00 §3）。'
     + '理論値と食い違う場所こそ、理論値が取りこぼしている要素の在処。';
@@ -3214,7 +4511,7 @@ function measuredCard(unit){
 
   const rows = M.items.slice().sort((a,b)=>a.place-b.place);
   const tbl=el('table'), th=el('thead'), tr=el('tr');
-  ['実測順位','アイテム3個','平均順位','Top4率','1位率','試合数','理論値での順位']
+  ['実測順位','アイテム3個','平均順位','上位4位率','1位率','試合数','理論値での順位']
     .forEach(x=>{const e=el('th',null,x); e.style.cursor='default'; tr.appendChild(e);});
   th.appendChild(tr); tbl.appendChild(th);
   const tb=el('tbody');
@@ -3222,7 +4519,8 @@ function measuredCard(unit){
     const row=el('tr');
     row.appendChild(el('td','num',String(i+1)));
     const c2=el('td','wrap');
-    r.names.forEach(n=>c2.appendChild(el('span','tag',n)));
+    r.names.forEach(function(n){ const s=el('span','tag',inameOf(n)); s.title=n;
+                                 c2.appendChild(s); });
     row.appendChild(c2);
     const p=el('td','num',String(r.place));
     if(r.place<4.0) p.style.color='var(--ok)';
@@ -3244,7 +4542,7 @@ function measuredCard(unit){
   c.appendChild(el('div','note',
     '実測の上位 '+rows.length+' 組のうち、理論値（上の「理想アイテム」表）の上位 '
     +(unit.bis||[]).length+' 組にも入っているのは '+hit+' 組。'
-    +'一致しない組は「理論値では説明できない強さ」＝ CC・射程・積み上げ・使いやすさの寄与。'));
+    +'一致しない組は「理論値では説明できない強さ」＝ 行動妨害・射程・積み上げ・使いやすさの寄与。'));
   return c;
 }
 
@@ -3256,14 +4554,14 @@ function measuredCard(unit){
 function timelineCard(unit){
   const c = el('div','card');
   c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
-  c.appendChild(el('h2',null,'秒数別の推移 — '+unit.name));
+  c.appendChild(el('h2',null,'秒数別の推移 — '+uname(unit)));
 
   const base = unit.base || {};
   const st2 = unit.stars && unit.stars['2'] || {};
   const head = el('div','note');
   const interval = base.attackSpeed ? (1/base.attackSpeed).toFixed(2) : '—';
   head.innerHTML =
-    '素の状態: 通常攻撃1発 <b>'+fmt(st2.ad)+'</b>（クリ込みの期待値ではない素のAD）を '
+    '素の状態: 通常攻撃1発 <b>'+fmt(st2.ad)+'</b>（クリ込みの期待値ではない素の攻撃力）を '
     + '<b>'+interval+'秒ごと</b>（攻撃速度 '+fmt(base.attackSpeed)+'）'
     + '　マナ <b>'+fmt(base.initialMana)+' → '+fmt(base.mana)+'</b>'
     // ★ 初回詠唱は cast_interval ではなく first_cast ★
@@ -3285,7 +4583,7 @@ function timelineCard(unit){
     c.appendChild(el('div',null,'')).appendChild(el('b',null,title));
     if(note) c.appendChild(el('div','note',note));
     const tbl=el('table'), th=el('thead'), tr=el('tr');
-    ['経過','合計ダメージ','平均DPS','通常攻撃','スキル','継続','通常の割合','攻撃/詠唱']
+    ['経過','合計ダメージ','平均の秒間ダメージ','通常攻撃','スキル','継続','通常の割合','攻撃/詠唱']
       .forEach(x=>{const e=el('th',null,x); e.style.cursor='default'; tr.appendChild(e);});
     th.appendChild(tr); tbl.appendChild(th);
     const tb=el('tbody');
@@ -3317,15 +4615,16 @@ function timelineCard(unit){
   table('アイテムなし', unit.timeline_bare,
         '素の性能。ここからアイテムでどれだけ伸びるかを見る。');
   if(unit.timeline_bis && unit.bis && unit.bis.length){
-    table('理論値1位のアイテム: '+unit.bis[0].items.join(' + '), unit.timeline_bis,
+    table('理論値1位のアイテム: '+unit.bis[0].items.map(inameOf).join(' + '), unit.timeline_bis,
           '積み上げ系が入っている場合、後半ほど伸びる。'
           + '短い戦闘しか想定しないなら別の組み合わせの方が上になる。');
   }
 
   c.appendChild(el('div','note',
     '青＝通常攻撃 / 紫＝スキル の割合。'
-    + 'スキルの比率が高いユニットは、マナを回すアイテム（Blue Buff・Spear of Shojin）が効く。'
-    + '通常攻撃の比率が高いユニットは攻撃速度とADが効く。'));
+    + 'スキルの比率が高いユニットは、マナを回すアイテム（' + inameOf('Blue Buff') + '・'
+    + inameOf('Spear of Shojin') + '）が効く。'
+    + '通常攻撃の比率が高いユニットは攻撃速度と攻撃力が効く。'));
   c.appendChild(el('div','note',
     '相手の構成によって何秒生きられるかは変わる。そこは使う人が判断する前提で、'
     + 'ここでは推移だけを出している。'));
@@ -3338,12 +4637,12 @@ function timelineCard(unit){
 function augMatchCard(comp, carry){
   const c = el('div','card');
   c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
-  c.appendChild(el('h2',null,'この構成に噛み合うオーグメント — '+carry.name));
+  c.appendChild(el('h2',null,'この構成に噛み合うオーグメント — '+uname(carry)));
   const ctx = {units: comp.units, carry: carry,
                traits: (comp.active||[]).map(a=>a.name), taken: []};
   const rec = recommendAugments(ctx, 12);
   const sub = el('div','note');
-  sub.innerHTML = '発動中: ' + (ctx.traits||[]).join(' / ')
+  sub.innerHTML = '発動中: ' + (ctx.traits||[]).map(tnameOf).join(' / ')
     + '<br><b>「順位が上がる順」ではない。</b>噛み合いの根拠が何本あるかで並べている。'
     + 'オーグメントの組み合わせ別の実測成績はどのデータ源にも無いので、強さの順位は付けられない。'
     + '対戦中に取ったものを踏まえて絞りたいときは、上のモードを「対戦中」にする。';
@@ -3360,8 +4659,8 @@ function augMatchCard(comp, carry){
   rec.forEach(x=>{
     const row=el('tr');
     row.appendChild(el('td',null,whySummary(x.why)));
-    row.appendChild(el('td',null,x.aug.rarity||'?'));
-    row.appendChild(el('td',null,x.aug.name));
+    row.appendChild(el('td',null,rarityJa(x.aug.rarity)));
+    row.appendChild(el('td',null,x.aug.name_ja||x.aug.name));
     row.appendChild(whyCell(x.why));
     tb.appendChild(row);
   });
@@ -3374,37 +4673,59 @@ function augMatchCard(comp, carry){
   return c;
 }
 
-/* ---------- キャリー逆引き画面 ---------- */
-// 開いた瞬間に中身が出るよう、通常DPS が最も高いユニットを既定のキャリーにする
+/* ---------- キャラから構成（旧「キャリー逆引き」）----------
+   ★ 名前と発想を変えた ★ 軸はキャリーとは限らない。前衛でも引ける。
+   carrySel は配置タブ・対戦中タブと共有している選択なので残し、
+   この画面が使うのは axisSel（同じ値を指す）にした。 */
+// 開いた瞬間に中身が出るよう、通常DPS が最も高いユニットを既定の軸にする
 let carrySel=(T.units.slice().sort((a,b)=>b.stars['2'].auto_dps-a.stars['2'].auto_dps)[0]||{}).apiName||null;
+let axisSel=carrySel;
 let carrySize=8;
 const carryExclude=new Set();
 
+/* この軸に対応する構成データ（型・★3・アイテム）があるか。
+   ★ 型の判定を JS で作り直さない ★ 規則を2か所に書くと必ずずれる。
+   forecast に同じ軸の行があるときだけ、その行の roll をそのまま出す。 */
+function rollForAxis(api){
+  const rows = ((T.forecast||{}).rows)||[];
+  const hit = rows.filter(function(r){ return r.carryApi===api; })[0];
+  return hit || null;
+}
 function renderCarry(m){
   const ctl=el('div','controls');
   const sel=el('select');
-  sel.appendChild(new Option('キャリーを選ぶ…',''));
-  T.units.slice().sort((a,b)=>b.cost-a.cost||a.name.localeCompare(b.name))
-    .forEach(u=>sel.appendChild(new Option(u.name+' (c'+u.cost+') — '+u.traits.join('/'),u.apiName)));
-  if(carrySel) sel.value=carrySel;
+  sel.appendChild(new Option('軸にする駒を選ぶ…',''));
+  T.units.slice().sort((a,b)=>b.cost-a.cost||uname(a).localeCompare(uname(b),'ja'))
+    .forEach(u=>sel.appendChild(new Option(optName(u)+' — '+u.traits.map(tnameOf).join('/'),u.apiName)));
+  if(axisSel) sel.value=axisSel;
   const size=el('select');
-  [6,7,8,9,10].forEach(n=>size.appendChild(new Option('盤面 '+n+' 体（Lv'+n+'）',n)));
+  [6,7,8,9,10].forEach(n=>size.appendChild(new Option('盤面 '+n+' 体（レベル'+n+'）',n)));
   size.value=String(carrySize);
   ctl.append(sel,size);
   const status=el('span','dim'); ctl.appendChild(status);
   m.appendChild(ctl);
 
   const note=el('div','note');
-  note.innerHTML='トレイトの噛み合いが最良になる並びをビーム探索で求める。'+
-    '<b>アイテム・配置・駒の引きやすさ・実戦の勝率は入っていない。</b>'+
-    'キャリー自身のトレイトは2倍に重み付け。同じチャンピオンの別版（Lux など）は同時に置けない扱い。';
-  m.appendChild(note);
+  note.innerHTML='<b>使いたい駒（軸）を1つ決めると、それを必ず含む構成を出す。</b>'
+    + '軸は<b>キャリーでも前衛でもよい</b> ── 「この壁を使いたい」から引ける。'
+    + '<br>トレイトの噛み合いが最良になる並びをビーム探索で求める。'
+    + '<b>アイテム・配置・駒の引きやすさ・実戦の勝率は入っていない。</b>'
+    + '軸自身のトレイトは2倍に重み付け、軸のトレイトが1つも点かない解には減点6.0。'
+    + '同じチャンピオンの別版（' + unameOf('Lux') + ' など）は同時に置けない扱い。';
+  const note2=el('div','note');
+  note2.innerHTML='<b>前衛を軸にしたときも重みと減点は変えていない。</b>'
+    + 'エンジン側（src/engine/comps.py）で前衛31体を軸に4案を実測した結果、'
+    + '重みを下げると<b>軸のトレイトが1つも発動しない解が8体で出た</b>（現行式では0体）。'
+    + 'トレイトの素点は現行式が 16.00、重み無しの案が 16.44 でほぼ差が無く、'
+    + '「軸が浮く」ほうの害が大きいと判断している。この判断は<b>未検証</b>。';
+  m.appendChild(premise('軸の重み2.0・減点6.0（前衛でも同じ）／アイテム・配置・勝率は入っていない',
+                        [note, note2]));
 
   if(carryExclude.size){
     const ex=el('div','note');
     ex.appendChild(document.createTextNode('除外中： '));
     Array.from(carryExclude).forEach(a=>{
-      const s=el('span','tag',UNIT_MAP[a].name+' ×');
+      const s=el('span','tag',uname(UNIT_MAP[a])+' ×');
       s.style.cursor='pointer';
       s.onclick=function(){ carryExclude.delete(a); render(); };
       ex.appendChild(s);
@@ -3417,8 +4738,8 @@ function renderCarry(m){
   function run(){
     const api=sel.value;
     carrySize=parseInt(size.value,10);
-    if(!api){ box.innerHTML='<div class="empty">キャリーを選ぶと構成を計算します</div>'; return; }
-    carrySel=api;
+    if(!api){ box.innerHTML='<div class="empty">軸にする駒を選ぶと構成を計算します</div>'; return; }
+    axisSel=api; carrySel=api;   // 配置・対戦中タブも同じ駒を見る
     status.textContent='計算中…';
     box.innerHTML='';
     setTimeout(function(){
@@ -3426,12 +4747,59 @@ function renderCarry(m){
       const res=solve(api, carrySize, {top:3, exclude:Array.from(carryExclude)});
       status.textContent=(Date.now()-t0)+' ms';
       if(!res.length){ box.innerHTML='<div class="empty">解が見つかりませんでした</div>'; return; }
+
+      // ---- 軸そのものの見出し（誰を軸にしているか・前衛か後衛か）----
+      const axis = UNIT_MAP[api];
+      const hd = el('div','card');
+      hd.style.position='static'; hd.style.maxHeight='none'; hd.style.marginBottom='12px';
+      const h1 = el('h2');
+      h1.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap';
+      h1.appendChild(unitIcon(axis,28));
+      h1.appendChild(document.createTextNode(uname(axis)+'（コスト'+axis.cost+'）を軸にした構成'));
+      const kind = res[0].axisKind || axisKind(axis);
+      const kb = el('span','badge '+(kind==='unknown'?'warn':'off'), AXIS_KIND_LABEL[kind]);
+      kb.title = kind==='unknown'
+        ? 'op.gg の役割名（リーパー / スペシャリストなど）では前衛か後衛か決まらず、'
+          + '射程2以下なので射程でも決めていない。射程1でキャリーをやる駒がここに入る。'
+        : '役割 '+roleJa(axis.role)+' から判定（表に無ければ射程3以上を後衛とする）';
+      h1.appendChild(kb);
+      h1.appendChild(backlineTag(axis));
+      hd.appendChild(h1);
+      hd.appendChild(el('div','note',
+        '軸のトレイト: '+axis.traits.map(tnameOf).join(' / ')
+        + '　この案で発動しているのは '+res[0].axisTraitsHit+' / '+res[0].axisTraits+'。'));
+      if(res[0].axisTraitsHit===0)
+        hd.appendChild(noteHTML('<b>この案では軸のトレイトが1つも発動していない。</b>'
+          + '軸を置く意味が薄い解なので、盤面サイズを変えるか除外を見直すこと。','var(--bad)'));
+      // 型（何レベルで回すか）は構成データがある軸だけ。JS で判定を作り直さない。
+      const fr = rollForAxis(api);
+      if(fr) hd.appendChild(rollBlock(fr));
+      else hd.appendChild(el('div','note',
+        'この駒を主役にした構成は「先に使う構成」のデータに無いので、'
+        + '何レベルで回す型か・★3が現実的か・アイテムが何個要るかは出せない'
+        + '（型の判定は src/engine/rolllevel.py が正本で、画面では作り直していない）。'));
+      box.appendChild(hd);
+
       res.forEach(function(r,i){
         const c=el('div','card');
         c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
-        c.appendChild(el('h2',null,'案'+(i+1)+'　スコア '+r.score+'　合計コスト '+r.totalCost));
+        const ch=el('h2');
+        ch.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap';
+        ch.appendChild(document.createTextNode(
+          '案'+(i+1)+'　スコア '+r.score+'　合計コスト '+r.totalCost));
+        // この案のコスト分布。数えているだけで、型の判定はしていない。
+        const dd2=el('span','dist');
+        const cc2={};
+        r.units.forEach(function(u){ cc2[u.cost]=(cc2[u.cost]||0)+1; });
+        [1,2,3,4,5].forEach(function(k){
+          if(!cc2[k]) return;
+          dd2.appendChild(costChip(k));
+          dd2.appendChild(el('span','n','×'+cc2[k]));
+        });
+        ch.appendChild(dd2);
+        c.appendChild(ch);
         const tbl=el('table'), th=el('thead'), htr=el('tr');
-        ['C','ユニット','トレイト','通常DPS 2★','EHP 2★',''].forEach(function(x){
+        ['コスト','ユニット','トレイト','通常攻撃の秒間ダメージ 2★','実効体力 2★',''].forEach(function(x){
           const e=el('th',null,x); e.style.cursor='default'; htr.appendChild(e);});
         th.appendChild(htr); tbl.appendChild(th);
         const tb=el('tbody');
@@ -3441,20 +4809,32 @@ function renderCarry(m){
           const c2=el('td');
           c2.style.cssText='display:flex;align-items:center;gap:7px';
           c2.appendChild(unitIcon(UNIT_MAP[u.apiName]||u, 26));
-          if(u.apiName===r.carryApi){ const b=el('b',null,u.name+' ★'); b.style.color='var(--accent)'; c2.appendChild(b); }
-          else c2.appendChild(document.createTextNode(u.name));
+          if(u.apiName===r.axisApi){
+            const b=el('b'); b.appendChild(unitNameNode(u));
+            b.appendChild(document.createTextNode(' ★軸'));
+            b.style.color='var(--accent)'; c2.appendChild(b);
+          } else {
+            // 軸以外の駒も押せる。「この壁いいな」と思ったらそこから引き直せる。
+            const sw=el('span'); sw.style.cursor='pointer';
+            sw.title=u.name+' — 押すとこの駒を軸にし直す';
+            sw.appendChild(unitNameNode(u));
+            sw.onclick=function(e){ e.stopPropagation(); focusUnit(u.apiName); };
+            c2.appendChild(sw);
+          }
           tr.appendChild(c2);
           const c3=el('td','wrap');
           u.traits.forEach(function(t){
             let on=false;
             r.active.forEach(function(a){ if(a.name===t) on=true; });
-            c3.appendChild(el('span','tag'+(on?' hit':''),t));
+            const tg=el('span','tag'+(on?' hit':''),tnameOf(t));
+            tg.title=t;
+            c3.appendChild(tg);
           });
           tr.appendChild(c3);
           tr.appendChild(el('td','num',fmt(u.stars['2'].auto_dps)));
           tr.appendChild(el('td','num',fmt(u.stars['2'].ehp_p)));
           const c6=el('td');
-          if(u.apiName!==r.carryApi){
+          if(u.apiName!==r.axisApi){
             const x=el('button',null,'除外');
             x.style.cssText='background:var(--panel2);color:var(--dim);border:1px solid var(--line);border-radius:4px;padding:0 6px;cursor:pointer;font-size:11px';
             x.onclick=function(e){ e.stopPropagation(); carryExclude.add(u.apiName); render(); };
@@ -3469,17 +4849,47 @@ function renderCarry(m){
         const act=el('div'); act.style.marginTop='10px';
         act.appendChild(el('span','dim','発動中： '));
         r.active.forEach(function(a){
-          const s=el('span','tag hit',a.name+' ('+a.minUnits+')');
-          const vars=Object.keys(a.variables||{}).map(function(k){return k+'='+fmt(a.variables[k]);}).join(', ');
-          if(vars) s.title=vars;
+          const s=el('span','tag hit',tnameOf(a.name)+' ('+a.minUnits+')');
+          const vars=Object.keys(a.variables||{}).map(function(k){
+            return termLabel(k)+'='+fmt(a.variables[k]);}).join(', ');
+          s.title=a.name+(vars?('\n'+vars):'');
+          // ★ 同じ人数で複数の段が同時に成立するトレイト（Set18 では Rival だけ）★
+          // 採る段は変えていない。どちらが強いかはデータからは決まらないので、
+          // 「別の段も成立している」ことだけ出して人が判断する。
+          if((a.alsoMatching||[]).length){
+            const b=el('span','badge warn','段2つ');
+            b.title='同じ人数で別の段も成立している: '
+              + a.alsoMatching.map(function(x){
+                  return x.minUnits+'〜'+(x.maxUnits==null?'∞':x.maxUnits)
+                       +'体 階級'+x.style; }).join(' / ')
+              + '\n採っているのは '+a.minUnits+'体の段（階級'+a.style+'）。'
+              + 'どちらが強いかはデータからは決まらない。';
+            s.appendChild(b);
+          }
+          if(a.tierGap){
+            const b=el('span','badge bad','段の穴');
+            b.title='どの段の人数範囲にも入っていないので、下の段で表示している';
+            s.appendChild(b);
+          }
           act.appendChild(s);
         });
         c.appendChild(act);
         if(r.dead.length){
           const dd=el('div','note');
           dd.textContent='あと少しで届くトレイト： '+r.dead.map(function(a){
-            return a.name+' あと'+a.needs+'体';}).join('  /  ');
+            return tnameOf(a.name)+' あと'+a.needs+'体';}).join('  /  ');
           c.appendChild(dd);
+        }
+        // オーグメント前提で数えなかった段。消すと「なぜ点かないのか」が分からない。
+        if((r.gated||[]).length){
+          c.appendChild(noteHTML('<b>オーグメント前提なので数えていない段: </b>'
+            + r.gated.map(function(a){
+                return tnameOf(a.name)+' を '+a.count+'体（'+a.gatedAt
+                     + '体以上の段はオーグメント「'+anameOf(a.gatedBy)+'」を'
+                     + '取って初めて成立する）';
+              }).join(' / ')
+            + '。取っている場合は、この構成の評価はここに書いてある分だけ低く出ている。',
+            'var(--warn)'));
         }
         box.appendChild(c);
       });
