@@ -4,6 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TFT 構成ラボ</title>
+<!-- ホーム画面に置いたときの見た目。図案は自作なので再配布の問題は無い。
+     六角形＝盤面の1マス。青→金はコスト色の両端（1コスト灰〜5コスト金）から取った。
+     iOS は角を自分で丸めるので、透明を残さず全面を塗ってある。
+     ★ ここは app/index.html（正本）に置くこと ★
+     2026-09-16 に複製の側だけに入れたため、publish が正本で上書きして
+     ホーム画面アイコンが消えた。同じことを繰り返さないように。 -->
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TFT ラボ">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#11151c">
+<link rel="manifest" href="manifest.webmanifest">
 <style>
 :root{
   --bg:#11151c; --panel:#171d26; --panel2:#1d2530; --line:#2a3442;
