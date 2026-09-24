@@ -177,6 +177,15 @@ details.en-orig>summary{cursor:pointer;color:var(--dim);font-size:11.5px}
 .hr{height:1px;background:var(--line);margin:12px 0}
 .empty{color:var(--dim);padding:30px;text-align:center}
 code{background:var(--panel2);padding:1px 5px;border-radius:3px;font-size:11.5px}
+
+/* 持つべき武器（3+3）。横スクロールにしない ── ユーザー:「横に行かないといけないのが寂しい」 */
+.six{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0;
+     background:var(--panel2,var(--panel))}
+.sixtitle{font-weight:700;margin-bottom:6px}
+.sixhead{display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap}
+.sixrow{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0}
+.sixline{font-size:12px;color:var(--dim);margin:2px 0 2px 2px;line-height:1.5}
+.sixwarn{font-size:12px;color:var(--bad);margin:4px 0;line-height:1.5}
 </style>
 </head>
 <body>
@@ -828,8 +837,13 @@ function noteHTML(html, color){
 }
 
 /* ---------- header ---------- */
+/* 「パッチ」は数字の版（op.gg のスキル係数）。パッチノートの番号が先に進んで
+   いるときは、それも並べる。9/23 は中身 18.2 のまま「パッチ 18.3」と出していた。 */
 $('#setmeta').textContent =
-  `セット ${T.meta.set_number}${T.meta.patch?' / パッチ '+T.meta.patch:''} · ユニット${T.units.length} · トレイト${T.traits.length} · アイテム${T.items.length} · オーグメント${T.augments.length}`;
+  `セット ${T.meta.set_number} / パッチ ${T.meta.patch || '?'}`
+  + ((T.freshness && T.freshness.theory_is_stale)
+     ? `（パッチノートは ${T.meta.notes_patch || '?'}・数字の一部は反映待ち）` : '')
+  + ` · ユニット${T.units.length} · トレイト${T.traits.length} · アイテム${T.items.length} · オーグメント${T.augments.length}`;
 
 const cov = T.meta.ability_coverage;
 /* 理論値と実測の鮮度のズレ。
@@ -837,18 +851,44 @@ const cov = T.meta.ability_coverage;
    ズレているときは常に見えるところに出す。 */
 (function(){
   const F = T.freshness;
-  if(!F || !F.measured_is_stale) return;
-  const d = document.createElement('div');
-  d.className = 'banner';
-  d.style.background = '#3d2326';
-  d.style.color = '#f3b5bb';
-  d.innerHTML = '<b>実測は前のパッチのものです。</b>'
-    + '理論値＝パッチ <b>' + (F.theory_patch || '?') + '</b>（Riot のデータから即時）／'
-    + '実測＝パッチ <b>' + (F.measured_patch || '?') + '</b>（op.gg の集計待ち）。'
-    + 'このズレがあるあいだ、<b>予想順位と実測メタは前のパッチの環境</b>を映しています。'
-    + '理論ダメージ・構成・配置・オーグメントは新しいパッチで計算されています。';
+  if(!F) return;
   const b = document.getElementById('banner');
-  b.parentNode.insertBefore(d, b.nextSibling);
+  function put(html){
+    const d = document.createElement('div');
+    d.className = 'banner';
+    d.style.background = '#3d2326';
+    d.style.color = '#f3b5bb';
+    d.innerHTML = html;
+    b.parentNode.insertBefore(d, b.nextSibling);
+  }
+  /* ★ 理論値の数字そのものが古い（2026-09-24 追加）★
+     スキル係数は op.gg から取っているので、パッチノートが出ても
+     op.gg が更新されるまで数字は前の版のまま。9/23 はこれを出さずに
+     「理論値は新しいパッチの数字」と読める帯を出していた（中身は前の版）。 */
+  /* 何が古いかを分けて言う（レビュー #17）。確かめていないこと（オーグメントまで全部、など）は言わない。 */
+  if(F.theory_is_stale){
+    const esc = function(x){ return String(x == null ? '' : x).replace(/[&<>"]/g,
+      function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
+    let h = '<b>パッチ ' + esc(F.notes_patch || '?') + ' の数字は、まだ一部しか入っていません。</b>';
+    if(F.opgg_lag){
+      h += 'スキル係数の元データ（op.gg）がまだ <b>' + esc(F.theory_patch || '版不明') + '</b> です。';
+    }
+    if(F.riot_lag){
+      h += 'トレイト・基礎ステータスの元データ（Riot の配信データ）に、パッチノート前の値が残っています'
+        + '（' + (F.riot_stale || []).map(function(x){
+            return esc(x.who) + ' ' + esc(x.what) + ' が ' + esc(x.old) + ' のまま（ノートでは ' + esc(x.new) + '）';
+          }).join('／') + '）。';
+    }
+    h += '理論ダメージ・構成・配置は、この古い数字を含んだまま計算されています。元データが更新されると自動で取り直します。';
+    put(h);
+    return;
+  }
+  if(F.measured_is_stale){
+    put('<b>実測は前のパッチのものです。</b>'
+      + '理論値＝パッチ <b>' + (F.theory_patch || '?') + '</b>（スキル係数は op.gg・基礎ステータスは Riot）／'
+      + '実測＝パッチ <b>' + (F.measured_patch || '?') + '</b>（op.gg の集計待ち）。'
+      + 'このズレがあるあいだ、<b>予想順位と実測メタは前のパッチの環境</b>を映しています。');
+  }
 })();
 
 $('#banner').innerHTML = cov > 0.5
@@ -1307,6 +1347,52 @@ function decorate(u){
   });
 }
 
+
+/* ★ 持つべき武器を「先に」出す（NEXT.md N）★
+   ユーザー:「キャラクターを触った時に構成だけじゃなくて**そいつが持つべき武器を
+     先に出してほしい**。3つと、最悪これでもいいよってやつで6つ」
+   中身は Python の itemrole.pick_six が焼いた unit.items6。
+   ここで順位を計算し直さない ── 順位の正本は unit.bis ひとつだけ。 */
+/* アイテムの順位を決めた秒数（build_app.py の ITEM_RANK_DURATION が正本）。
+   FIGHT_DURATION（8秒・詠唱回数の数え方）とは別物。レビュー #7 #8 で
+   アイテムの話に 8 秒を出していた箇所を全部これに揃えた。 */
+function itemRankSec(){
+  return Math.round(T.meta.item_rank_duration || T.meta.fight_duration || 8);
+}
+/* 説明文の **強調** を太字にする（レビュー #15）。先にエスケープしてから置き換える。 */
+function mdBold(t){
+  const e = String(t == null ? '' : t).replace(/[&<>"]/g,
+    function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; });
+  return e.replace(/[*][*]([^*]+)[*][*]/g, '<b>$1</b>');
+}
+function htmlDiv(cls, t){ const d = el('div', cls); d.innerHTML = mdBold(t); return d; }
+function itemsSixSet(box, rec, label, cls){
+  if(!rec) return;
+  const head = el('div','sixhead');
+  head.appendChild(el('span','badge '+cls, label));
+  head.appendChild(el('b', null, rec.type || '型なし'));
+  box.appendChild(head);
+  const row = el('div','sixrow');
+  (rec.items||[]).forEach(function(n){ row.appendChild(itemChip(n)); });
+  box.appendChild(row);
+  if(rec.why) box.appendChild(htmlDiv('note', rec.why));
+  (rec.lines||[]).forEach(function(t){ box.appendChild(htmlDiv('sixline', t)); });
+  (rec.warnings||[]).forEach(function(t){ box.appendChild(htmlDiv('sixwarn', t)); });
+}
+function itemsSixCard(u){
+  const s = u.items6;
+  if(!s) return null;
+  const box = el('div','six');
+  box.appendChild(el('div','sixtitle','持つべき武器'));
+  itemsSixSet(box, s.best, '本命', 'ok');
+  itemsSixSet(box, s.backup, '最悪これでも', '');
+  if(s.note) box.appendChild(el('div','note', s.note));
+  box.appendChild(el('div','note',
+    '順位は理論値（' + itemRankSec() + '秒戦ったときの合計ダメージ）。'
+    + '秒数ごとの比較は「キャラから構成」タブの「理想アイテム」の表にある。'));
+  return box;
+}
+
 function unitDetail(u){
   const c=el('div','card');
   const h=el('h2'); h.appendChild(unitNameNode(u)); h.title=u.name;
@@ -1317,6 +1403,9 @@ function unitDetail(u){
   // ★ キャラから入れるようにする ★
   // 「誰を使いたいか」から入るのが実際の入り口なので、
   // ユニットを見ている場所には必ず構成への導線を置く。前衛でも押せる。
+  // ★ 構成の導線より前に武器を出す（ユーザー:「武器を先に出してほしい」）★
+  const six = itemsSixCard(u);
+  if(six) c.appendChild(six);
   c.appendChild(axisButton(u));
 
   const sb=el('div','starbox');
@@ -2613,7 +2702,7 @@ function renderRank(m){
     + 'つまりこの並びの大半はコストの並びで、74体を一列にしても'
     + '「高コストが上にいる」しか読めない。<b>コスト帯で絞ってから比べること。</b>'
     + '<br>理論火力＝理論最適の3アイテムを持たせて '
-    + (T.meta.fight_duration || 8) + ' 秒戦ったときの合計ダメージ。'
+    + itemRankSec() + ' 秒戦ったときの合計ダメージ。'
     + '相手依存のもの（被弾によるマナ生成・回復・シールド・行動妨害・射線）は入っていない。'
     + 'ここで上位に来るのは「強い構成」ではなく「<b>理論火力が出る組み合わせ</b>」。';
   let cc = null;
@@ -2624,7 +2713,7 @@ function renderRank(m){
   }
   // 見出しカードを丸ごと畳む。**消していない**（summary に何を畳んだか書く）。
   cap.appendChild(premise('順位は出さない／並びの大半はコストの並び／'
-    + '理論火力は理論最適の3個で ' + (T.meta.fight_duration || 8) + '秒戦った合計',
+    + '理論火力は理論最適の3個で ' + itemRankSec() + '秒戦った合計',
     [capn, cc]));
   m.appendChild(cap);
 
@@ -2673,7 +2762,7 @@ function drawRankCarry(host){
         const d=el('span'); d.style.cssText='display:inline-flex;align-items:center;gap:7px';
         d.appendChild(unitIcon(u,24)); d.appendChild(unitNameNode(u));
         return d;}},
-      {key:'theo',label:'理論火力（理論最適 '+(T.meta.fight_duration||8)+'秒）',num:true,render:u=>{
+      {key:'theo',label:'理論火力（理論最適 '+itemRankSec()+'秒）',num:true,render:u=>{
         const b=theoBis(u); const s=el('span',null,String(theoTop(u)));
         if(b) s.title='通常 '+b.auto+' / スキル '+b.ability+' / 継続 '+b.burn
                     + '　攻撃 '+b.attacks+' 回・詠唱 '+b.casts+' 回';
@@ -2685,8 +2774,7 @@ function drawRankCarry(host){
         const b=theoBis(u);
         if(!b) return '—';
         const f=document.createDocumentFragment();
-        b.items.forEach(function(n){ const s=el('span','tag',inameOf(n)); s.title=n;
-                                     f.appendChild(s); });
+        b.items.forEach(function(n){ f.appendChild(itemChip(n)); });
         return f;}},
     ];
     tbox.innerHTML='';
@@ -2701,8 +2789,8 @@ function drawRankCarry(host){
     n.innerHTML='<b>行を押すと、その駒を軸にした構成が出る。</b>'
       + '見出しを押すと並べ替わる。<b>コスト当たり</b>は帯をまたいで比べたいとき用だが、'
       + 'コストは購入難易度でもあるので「安いほど得」とは限らない。'
-      + '<b>「8秒で詠唱 0 回」のユニットはスキル火力が出ていない</b>'
-      + '（理論最適の3個にマナアイテムが入っていればその分は入っている）。'
+      + '<b>「8秒で詠唱 0 回」は、8秒の時点ではまだ1回もスキルを撃てていない</b>という意味'
+      + '（理論火力は ' + itemRankSec() + ' 秒の合計なので、その後に撃ったスキルは入っている）。'
       + '<br>後衛到達の印は「跳ぶか」ではなく「<b>誰を狙うか</b>」で判定している。'
       + '跳んでも狙う相手が敵の塊なら前衛に着地する。';
     tbox.appendChild(n);
@@ -3252,15 +3340,19 @@ function growthAt(api, sec){
   return g[idx];
 }
 
+/* 生贄にしてはいけない駒。solve() が軸と must を入れる（Python の _axis_keep）。 */
+let _sacrificeKeep = new Set();
 function boardPower(apis, acts){
   if(!POWER) return null;
   const dps = {};
-  let ehp = 0;
+  /* 耐久は駒ごとに持つ（Python と同じ）。合計だけだと、生贄にした駒が
+     トレイトから貰った体力を盤面から外せない。 */
+  const ehpBy = {};
   for(const a of apis){
     const base = POWER.units[a];
     if(!base) return null;
     dps[a] = base[0];
-    ehp += base[1];
+    ehpBy[a] = base[1];
   }
   // トレイトの段が各駒に足す差分。Python が (段, 駒) で焼いてある。
   acts.forEach(function(act){
@@ -3271,23 +3363,72 @@ function boardPower(apis, acts){
       const d = per[a];
       if(!d) continue;
       dps[a] += d[0];
-      ehp += d[1];
+      ehpBy[a] += d[1];
     }
   });
+  let ehp = 0;
+  for(const a of apis) ehp += ehpBy[a];
+  /* ★ 枠を消費するトレイト（Python の board_power と同じ処理）★
+     Blackthorn は戦闘前に味方1体を生贄にするので、8体構成でも戦うのは7体。
+     Apex Predator は Elder Dragon が2枠を占有する。
+     レジストリは Python から焼いて渡している（JS で定義し直さない）。 */
+  let lost = 0;
+  const ST = POWER.slot_traits || {};
+  const slotNames = {};
+  acts.forEach(function(act){
+    if(act.style && ST[act.name]){ lost += ST[act.name]; slotNames[act.name] = 1; }
+  });
+  /* 生贄にしてはいけない駒（Python の board_power と同じ）:
+     軸と must（solve() が _sacrificeKeep に入れる）と、枠を消費するトレイトの持ち主自身。
+     候補が残らないときだけ、軸と must 以外から選ぶ。 */
+  /* 持ち主以外を先に使い切り、足りない分だけ持ち主から補う（Python と同じ）。 */
+  let pref = [], rest = [];
+  if(lost){
+    pref = apis.filter(function(a){
+      return !_sacrificeKeep.has(a)
+        && !(UNIT_MAP[a].traits || []).some(function(t){ return slotNames[t]; });
+    });
+    rest = apis.filter(function(a){ return !_sacrificeKeep.has(a) && pref.indexOf(a) < 0; });
+  }
+  let live = apis, sacrifice = null;
+  if(lost && pref.length + rest.length >= lost){
+    /* 外して損が最小の駒を選ぶ。目減りの近似は
+       その体の火力 x t + 盤面の火力 x その体の耐久 / 被弾。 */
+    const t0 = Math.min(ehp / POWER.incoming_dps, POWER.horizon);
+    let bd0 = 0;
+    for(const a of apis) if(dps[a] > 0) bd0 += dps[a];
+    if(!bd0) bd0 = 1;
+    /* 同点は apiName の順（Python と同じ）。比べる前に小数6桁に丸める。 */
+    const r6 = function(v){ return Math.round(v * 1e6) / 1e6; };
+    const cmp = function(x, y){
+      const vx = r6(Math.max(dps[x],0)*t0 + bd0*ehpBy[x]/POWER.incoming_dps);
+      const vy = r6(Math.max(dps[y],0)*t0 + bd0*ehpBy[y]/POWER.incoming_dps);
+      if(vx !== vy) return vx - vy;
+      return x < y ? -1 : (x > y ? 1 : 0);
+    };
+    const order = pref.slice().sort(cmp).concat(rest.slice().sort(cmp));
+    sacrifice = order.slice(0, lost);
+    sacrifice.forEach(function(a){ ehp -= ehpBy[a]; dps[a] = 0; });
+    const gone = {};
+    sacrifice.forEach(function(a){ gone[a] = 1; });
+    live = apis.filter(function(a){ return !gone[a]; });
+  }
   const seconds = ehp / POWER.incoming_dps;
   const t = Math.min(seconds, POWER.horizon);
   let boardDps = 0;
-  for(const a of apis){
+  for(const a of live){
     if(dps[a] <= 0) continue;
     boardDps += dps[a] * growthAt(a, t);
   }
-  return {value: Math.sqrt(t * boardDps), seconds: seconds,
-          capped: seconds > POWER.horizon, boardDps: boardDps, boardEhp: ehp};
+  return {value: Math.sqrt(t * boardDps), seconds: seconds, secondsUsed: t,
+          capped: seconds > POWER.horizon, boardDps: boardDps, boardEhp: ehp,
+          slotsLost: lost, sacrifice: sacrifice};
 }
 
 /* 「中央値の駒を size 体並べただけの盤面」を 1.0 とする基準。
    重みを「平均的な盤面で何点ぶんか」として読めるようにするため。 */
 const _powerRef = {};
+const _powerRefSec = {};
 function powerReference(size){
   if(!POWER) return null;
   if(_powerRef[size] !== undefined) return _powerRef[size];
@@ -3297,6 +3438,7 @@ function powerReference(size){
   const t = Math.min(size*medE/POWER.incoming_dps, POWER.horizon);
   const ref = Math.sqrt(t * size * medD);
   _powerRef[size] = ref || null;
+  _powerRefSec[size] = t || null;   /* 生存時間の基準（平均的な盤面を1.0にする） */
   return _powerRef[size];
 }
 function powerRatio(apis, acts){
@@ -3304,7 +3446,15 @@ function powerRatio(apis, acts){
   if(!bp) return 0;
   const ref = powerReference(apis.length);
   if(!ref) return 0;
-  return bp.value / ref;
+  let r = bp.value / ref;
+  /* 生存時間をもう一段掛ける（Python の SURVIVAL_EXP と同じ）。
+     基準で割ってあるので平均的な盤面は 1.0 のまま。 */
+  const se = POWER.survival_exp || 0;
+  if(se){
+    const rs = _powerRefSec[apis.length];
+    if(rs) r *= Math.pow(bp.secondsUsed / rs, se);
+  }
+  return r;
 }
 
 function scoreOf(apis, axisTraits, axisWeight){
@@ -3340,6 +3490,7 @@ function solve(axisApi, size, opts){
   const axisWeight=opts.axisWeight||opts.carryWeight||2.0;
   const banned=new Set(opts.exclude||[]);
   const must=new Set(opts.must||[]);
+  _sacrificeKeep = new Set([axisApi].concat(opts.must||[]));
   const axis=UNIT_MAP[axisApi];
   const axisTraits=new Set(axis.traits);
   const pool=T.units.filter(u=>!banned.has(u.apiName));
@@ -3496,7 +3647,7 @@ function itemCard(unit){
   const sc = (unit.ability && unit.ability.scaling) || {kind:'?', scales:[]};
   c.appendChild(el('h2',null,'理想アイテム — '+uname(unit)));
 
-  const dur = (T.meta && T.meta.fight_duration) || 8;
+  const dur = itemRankSec();
   const manaPer = unit.role && /Caster$/.test(unit.role) ? '7'
                 : unit.role && /Tank$/.test(unit.role) ? '5' : '10';
   const sub = el('div','note');
@@ -3505,8 +3656,11 @@ function itemCard(unit){
     + '瞬間の秒間ダメージでは積み上げ系（' + inameOf("Guinsoo's Rageblade") + ' / '
     + inameOf("Archangel's Staff") + ' / ' + inameOf("Kraken's Fury") + ' / '
     + inameOf("Titan's Resolve") + '）を'
-    + '表現できないため。戦闘時間は実測メタとの一致が最大になる点を探して決めた'
-    + '（6秒19% / <b>8秒27%</b> / 12秒20% / 30秒17%）。<br>'
+    + '表現できないため。以前は実測メタとの一致が最大になる 8 秒で順位を付けていた'
+    + '（6秒19% / 8秒27% / 12秒20% / 30秒17%）が、実戦の戦闘は 15〜30 秒なので '
+    + dur + ' 秒に変えた。<b>積み上げ系は秒数で順位が大きく動く</b>'
+    + '（' + inameOf("Guinsoo's Rageblade") + ' が理論1位に入るのは 8秒で5% / 10秒で11% / 20秒で89%）。'
+    + '秒数ごとの列を見て判断すること。<br>'
     + 'スキル: <b>'+scaleJa(sc.kind||'不明')+'型</b>'
     + (sc.scales&&sc.scales.length ? '（参照: '+sc.scales.map(scaleJa).join(' / ')+'）' : '')
     + '　ロール <b>'+roleJa(unit.role)+'</b>（通常攻撃1回のマナ '+manaPer+'）';
@@ -3541,7 +3695,13 @@ function itemCard(unit){
   }
 
   const tbl=el('table'), th=el('thead'), tr=el('tr');
-  ['#','アイテム3個','合計ダメージ','実測の平均順位','通常','スキル','継続','攻撃/詠唱','体力','攻撃力','魔力','攻撃速度','クリ率']
+  /* 秒数の列は meta から作る（build_app.py の ITEM_DURATIONS が正本）。 */
+  const DURS = (T.meta.item_durations || []).map(function(x){ return Math.round(x); });
+  const RANK_D = Math.round(T.meta.item_rank_duration || 0);
+  /* 秒数の列を持たない古い data.js でも、順位の元の合計ダメージは出す（レビュー #24）。 */
+  const NO_DUR = !DURS.length;
+  ['#','アイテム3個'].concat(NO_DUR ? ['合計ダメージ'] : DURS.map(function(x){ return x+'秒'; }),
+   ['実測の平均順位','通常','スキル','継続','攻撃/詠唱','体力','攻撃力','魔力','攻撃速度','クリ率'])
     .forEach(x=>{const e=el('th',null,x); e.style.cursor='default'; tr.appendChild(e);});
   th.appendChild(tr); tbl.appendChild(th);
   const tb=el('tbody');
@@ -3549,12 +3709,25 @@ function itemCard(unit){
     const row=el('tr');
     row.appendChild(el('td','num',String(i+1)));
     const c2=el('td','wrap');
-    b.items.forEach(function(n){ const s=el('span','tag',inameOf(n)); s.title=n;
-                                 c2.appendChild(s); });
+    b.items.forEach(function(n){ c2.appendChild(itemChip(n)); });
     row.appendChild(c2);
-    const tot=el('td','num',b.total.toLocaleString());
-    if(i===0) tot.style.color='var(--ok)';
-    row.appendChild(tot);
+    /* 秒数ごとの合計ダメージ。順位は RANK_D 秒の列で決めている。
+       ぐいんそーのような積み上げ系は秒数で順位が変わるので、
+       「どの秒数の話か」を画面から消さない。 */
+    const bys = b.by_seconds || {};
+    if(NO_DUR){
+      const td0 = el('td','num', b.total==null ? '—' : Math.round(b.total).toLocaleString());
+      if(i===0) td0.style.color='var(--ok)';
+      row.appendChild(td0);
+    }
+    DURS.forEach(function(d){
+      const v = bys[d];
+      const td = el('td','num', v==null ? '—' : Math.round(v).toLocaleString());
+      if(d===RANK_D){ td.title='この列で順位を決めている';
+                  if(i===0) td.style.color='var(--ok)'; }
+      else td.style.color='var(--dim)';
+      row.appendChild(td);
+    });
     const mp=el('td','num', b.measured_place ? b.measured_place+'位' : '—');
     if(b.measured_place){
       mp.title = 'op.gg の実測 '+(b.measured_n||0).toLocaleString()+' 試合 / 上位4位率 '
@@ -3872,6 +4045,44 @@ const SECONDS_PER_HEX = (function(){
    3段で落ちる: ローカルの img/ → Community Dragon → 頭文字＋コスト色の丸。
    どこまで落ちても画面は成立する。 */
 const COST_COLOR = {1:'#8b98a8', 2:'#7bc86c', 3:'#6ea8fe', 4:'#c792ea', 5:'#e0a33e'};
+
+
+/* アイテムのアイコン。unitIcon と同じ作り（画像が出なければ頭文字に落ちる）。
+   画像はこちらで配らず Community Dragon の URL を指すだけ。 */
+function itemIcon(name, px){
+  px = px || 20;
+  const it = (T.items||[]).filter(function(x){ return x.name === name; })[0];
+  const wrap = el('span');
+  wrap.style.cssText = 'display:inline-block;width:'+px+'px;height:'+px+'px;'
+    + 'border-radius:4px;overflow:hidden;vertical-align:middle;flex:0 0 auto;'
+    + 'border:1px solid var(--line);background:var(--panel2)';
+  wrap.title = name;
+  const fallback = function(){
+    wrap.textContent = ((it && it.name_ja) || name || '?').slice(0,1);
+    wrap.style.display = 'inline-flex';
+    wrap.style.alignItems = 'center';
+    wrap.style.justifyContent = 'center';
+    wrap.style.fontSize = Math.round(px*0.55)+'px';
+    wrap.style.color = 'var(--dim)';
+  };
+  if(!it || !it.img_cdn){ fallback(); return wrap; }
+  const im = el('img');
+  im.alt = name; im.loading = 'lazy';
+  im.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
+  im.onerror = function(){ wrap.innerHTML=''; fallback(); };
+  im.src = it.img_cdn;
+  wrap.appendChild(im);
+  return wrap;
+}
+/* 「アイコン＋日本語名」の札。アイテムを出す所はここを通す。 */
+function itemChip(name){
+  const sp = el('span','tag');
+  sp.style.cssText = 'display:inline-flex;align-items:center;gap:4px';
+  sp.appendChild(itemIcon(name, 20));
+  sp.appendChild(document.createTextNode(inameOf(name)));
+  sp.title = name;
+  return sp;
+}
 
 function unitIcon(unit, px){
   px = px || 28;
@@ -4639,8 +4850,7 @@ function measuredCard(unit){
     const row=el('tr');
     row.appendChild(el('td','num',String(i+1)));
     const c2=el('td','wrap');
-    r.names.forEach(function(n){ const s=el('span','tag',inameOf(n)); s.title=n;
-                                 c2.appendChild(s); });
+    r.names.forEach(function(n){ c2.appendChild(itemChip(n)); });
     row.appendChild(c2);
     const p=el('td','num',String(r.place));
     if(r.place<4.0) p.style.color='var(--ok)';
