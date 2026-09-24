@@ -853,13 +853,39 @@ const cov = T.meta.ability_coverage;
   const F = T.freshness;
   if(!F) return;
   const b = document.getElementById('banner');
-  function put(html){
+  /* info=true は案内（青）、それ以外は警告（赤）。 */
+  function put(html, info){
     const d = document.createElement('div');
     d.className = 'banner';
-    d.style.background = '#3d2326';
-    d.style.color = '#f3b5bb';
+    d.style.background = info ? '#172a3a' : '#3d2326';
+    d.style.color = info ? '#b9d7f2' : '#f3b5bb';
     d.innerHTML = html;
     b.parentNode.insertBefore(d, b.nextSibling);
+  }
+  const esc = function(x){ return String(x == null ? '' : x).replace(/[&<>"]/g,
+    function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
+  const rows = function(xs, mid){
+    return (xs || []).map(function(x){
+      return esc(x.who) + ' ' + esc(x.what) + ' ' + esc(x.old) + mid + esc(x.new);
+    }).join('／');
+  };
+  /* ★ パッチノートの値で上書きして計算している箇所（2026-09-24）★
+     Riot の配信データが遅れていても、変更前の値が完全一致した箇所は公式パッチノートの
+     値で計算している。赤い「古い」ではなく、何をどう上書きしたかを案内する。 */
+  const OV = F.riot_overlaid || [];
+  if(OV.length){
+    /* used=false はエンジンが計算に使っていない値（盟約の魔女のエッセンスなど。経済）。
+       「この値で計算しています」と言うと嘘になるので分けて書く（レビュー e030142）。 */
+    const one = function(x){
+      return esc(x.who) + ' ' + esc(x.what) + ' ' + esc(x.old) + ' → ' + esc(x.new)
+        + (x.used === false ? '（計算には入っていない値）' : '');
+    };
+    put('<b>パッチノートの値で計算しています（' + OV.length + ' か所）。</b>'
+      + 'Riot の配信データがまだパッチ ' + esc(F.notes_patch || '?') + ' の値になっていないので、'
+      + '次の値は公式パッチノートから取っています: ' + OV.map(one).join('／') + '。'
+      + 'Riot が更新されたら自動で配信データの値に戻ります。'
+      + '<br>※ ノートの値が Riot の最終的な値と一致するとは限りません'
+      + '（過去にノートと違う値が配信されたことが2回ある）。', true);
   }
   /* ★ 理論値の数字そのものが古い（2026-09-24 追加）★
      スキル係数は op.gg から取っているので、パッチノートが出ても
@@ -867,15 +893,13 @@ const cov = T.meta.ability_coverage;
      「理論値は新しいパッチの数字」と読める帯を出していた（中身は前の版）。 */
   /* 何が古いかを分けて言う（レビュー #17）。確かめていないこと（オーグメントまで全部、など）は言わない。 */
   if(F.theory_is_stale){
-    const esc = function(x){ return String(x == null ? '' : x).replace(/[&<>"]/g,
-      function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
     let h = '<b>パッチ ' + esc(F.notes_patch || '?') + ' の数字は、まだ一部しか入っていません。</b>';
     if(F.opgg_lag){
       h += 'スキル係数の元データ（op.gg）がまだ <b>' + esc(F.theory_patch || '版不明') + '</b> です。';
     }
-    if(F.riot_lag){
-      h += 'トレイト・基礎ステータスの元データ（Riot の配信データ）に、パッチノート前の値が残っています'
-        + '（' + (F.riot_stale || []).map(function(x){
+    if((F.riot_stale || []).length){
+      h += 'トレイト・基礎ステータスの元データ（Riot の配信データ）に、パッチノートで上書きできない'
+        + '古い値が残っています（' + (F.riot_stale || []).map(function(x){
             return esc(x.who) + ' ' + esc(x.what) + ' が ' + esc(x.old) + ' のまま（ノートでは ' + esc(x.new) + '）';
           }).join('／') + '）。';
     }
@@ -885,7 +909,8 @@ const cov = T.meta.ability_coverage;
   }
   if(F.measured_is_stale){
     put('<b>実測は前のパッチのものです。</b>'
-      + '理論値＝パッチ <b>' + (F.theory_patch || '?') + '</b>（スキル係数は op.gg・基礎ステータスは Riot）／'
+      + '理論値＝パッチ <b>' + (F.theory_patch || '?') + '</b>'
+      + '（スキル係数は op.gg・トレイトと基礎ステータスは Riot の配信データ。遅れている箇所はパッチノート）／'
       + '実測＝パッチ <b>' + (F.measured_patch || '?') + '</b>（op.gg の集計待ち）。'
       + 'このズレがあるあいだ、<b>予想順位と実測メタは前のパッチの環境</b>を映しています。');
   }
@@ -3657,8 +3682,9 @@ function itemCard(unit){
     + inameOf("Archangel's Staff") + ' / ' + inameOf("Kraken's Fury") + ' / '
     + inameOf("Titan's Resolve") + '）を'
     + '表現できないため。以前は実測メタとの一致が最大になる 8 秒で順位を付けていた'
-    + '（6秒19% / 8秒27% / 12秒20% / 30秒17%）が、実戦の戦闘は 15〜30 秒なので '
-    + dur + ' 秒に変えた。<b>積み上げ系は秒数で順位が大きく動く</b>'
+    + '（6秒19% / 8秒27% / 12秒20% / 30秒17%）。いまは ' + dur + ' 秒で順位を付けている'
+    + '（20 秒ではぐいんそーが大半のユニットで1位になり、効きすぎと判断した）。'
+    + '<b>積み上げ系は秒数で順位が大きく動く</b>'
     + '（' + inameOf("Guinsoo's Rageblade") + ' が理論1位に入るのは 8秒で5% / 10秒で11% / 20秒で89%）。'
     + '秒数ごとの列を見て判断すること。<br>'
     + 'スキル: <b>'+scaleJa(sc.kind||'不明')+'型</b>'
