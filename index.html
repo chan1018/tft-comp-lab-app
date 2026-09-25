@@ -163,6 +163,7 @@ details.en-orig>summary{cursor:pointer;color:var(--dim);font-size:11.5px}
 .roll.lv8{color:#d3a4e6;border-color:#553a63}
 .roll.lv9{color:#e8c16a;border-color:#6b5524}
 .roll.unknown{color:var(--dim)}
+.roll.mismatch{color:var(--warn);border-style:dashed}
 .rollmini{font-weight:700;font-size:12px}
 .dist{display:inline-flex;gap:3px;align-items:center;flex-wrap:wrap}
 .dist span.n{font-size:11px;color:var(--dim);margin-right:4px}
@@ -702,6 +703,12 @@ const CONST_JA = {
   UNITS_FOR_2_STAR:'★2に必要な枚数', UNITS_FOR_3_STAR:'★3に必要な枚数',
   XP_BUY_AMOUNT:'1回の購入で得る経験値', XP_BUY_COST:'経験値購入の費用',
   XP_TO_NEXT_LEVEL:'次のレベルまでの経験値',
+  // ロール型の前提（rolllevel.ASSUMPTIONS）。前提の枠で英語の変数名のまま出ていた。
+  roll_budget_gold:'1回のリロール段階で吐くゴールド', owned_at_start:'回し始めの保有枚数',
+  tier_drain:'コスト帯の枯れ具合', contested:'同じ駒を持つ他プレイヤー',
+  item_builds_per_game:'1ゲームで組める完成アイテム',
+  roll_min_targets:'リロール盤面の★3にする駒の最小数',
+  field_line:'そのレベルで「出せる駒」とみなす★2到達率の線',
 };
 const CONST_UNIT_JA = {gold:'ゴールド', XP:'経験値'};
 
@@ -853,12 +860,13 @@ const cov = T.meta.ability_coverage;
   const F = T.freshness;
   if(!F) return;
   const b = document.getElementById('banner');
-  /* info=true は案内（青）、それ以外は警告（赤）。 */
-  function put(html, info){
+  /* kind: true=案内（青）／'neutral'=中立（灰）／それ以外=警告（赤）。
+     'neutral' を先に見る（文字列は真なので、先に見ないと青になる）。 */
+  function put(html, kind){
     const d = document.createElement('div');
     d.className = 'banner';
-    d.style.background = info ? '#172a3a' : '#3d2326';
-    d.style.color = info ? '#b9d7f2' : '#f3b5bb';
+    d.style.background = kind === 'neutral' ? 'var(--panel2)' : kind ? '#172a3a' : '#3d2326';
+    d.style.color = kind === 'neutral' ? 'var(--fg)' : kind ? '#b9d7f2' : '#f3b5bb';
     d.innerHTML = html;
     b.parentNode.insertBefore(d, b.nextSibling);
   }
@@ -869,6 +877,30 @@ const cov = T.meta.ability_coverage;
       return esc(x.who) + ' ' + esc(x.what) + ' ' + esc(x.old) + mid + esc(x.new);
     }).join('／');
   };
+  /* ★ 前のパッチのノートとの食い違い（2026-09-24。表示だけ・上書きしない）★
+     ユーザー「まだやっていないことの反映が必要ならお願い」。18.2 のラピッドファイアのように、
+     前のパッチのノートの変更前の値が Riot のデータに残っている箇所。遅れなのか、ノートと実際の
+     ゲームが違うのかは確かめられない（マスター・イーは 60 でも 65 でもなく 62 が配信された）ので、
+     赤（古い）でも青（上書き中）でもなく中立（灰）で、両方の出典の値だけを並べる。
+     最初に put するので帯の一番下に出る。theory_is_stale の return より前に置く（op.gg が遅れていても消えない）。
+     文字が多すぎる（NEXT.md B）ので、たたんだ1行にする。 */
+  const ON = ((F.older_notes || {}).mismatch) || [];
+  if(ON.length){
+    const onS = '前のパッチのノートと Riot のデータで値が違う箇所が ' + ON.length + ' か所あります（'
+      + ON.map(function(x){
+          return esc(x.who) + (x.tiers && x.tiers.length
+            ? ' ' + x.tiers.map(function(t){ return esc(t.min); }).join('・') + '体' : '');
+        }).join('／') + '）。'
+      + (ON.every(function(x){ return x.used === false; })
+         ? 'どれも計算には入っていない値です。' : '計算は Riot の値のままです。');
+    const onB = ON.map(function(x){
+        return esc(x.who) + ' ' + esc(x.what) + ': Riot ' + esc(x.riot) + '／パッチ'
+          + esc((x.patches || [x.patch]).join('・')) + 'のノート ' + esc(x.notes)
+          + (x.used === false ? '（計算には入っていない値）' : '');
+      }).join('<br>')
+      + '<br>どちらが実際のゲームの値かは確かめられていないので、ノートの値での上書きはしていません。';
+    put('<details><summary>' + onS + '</summary>' + onB + '</details>', 'neutral');
+  }
   /* ★ パッチノートの値で上書きして計算している箇所（2026-09-24）★
      Riot の配信データが遅れていても、変更前の値が完全一致した箇所は公式パッチノートの
      値で計算している。赤い「古い」ではなく、何をどう上書きしたかを案内する。 */
@@ -887,6 +919,27 @@ const cov = T.meta.ability_coverage;
       + '<br>※ ノートの値が Riot の最終的な値と一致するとは限りません'
       + '（過去にノートと違う値が配信されたことが2回ある）。', true);
   }
+  /* ★ op.gg 側（スキル係数）もパッチノートの値で計算している箇所（2026-09-24）★
+     ユーザー「まだやっていないことの反映が必要ならお願い」。op.gg はパッチ当日に約1日遅れる。
+     変更前の値が同じユニットの1項と完全一致した箇所だけノートの値で計算している
+     （src/source_check.py の apply_opgg_overlay）。15 か所になりうるので一覧はたたむ（NEXT.md B）。 */
+  const OGV = F.opgg_overlaid || [];
+  const OGN = F.opgg_not_overlaid || [];
+  const OGM = F.opgg_not_modeled || [];
+  const ogModeled = OGM.length
+    ? '<br><span class="dim">このツールが計算していない形の変更（'
+      + OGM.map(function(x){ return esc(x.who); })
+          .filter(function(w, i, a){ return a.indexOf(w) === i; }).join('・')
+      + ' など）は数字に入っていません。</span>' : '';
+  if(OGV.length){
+    put('<b>スキル係数もパッチノートの値で計算しています（' + OGV.length + ' か所）。</b>'
+      + '<details><summary>一覧</summary>' + OGV.map(function(x){
+          return esc(x.who) + ' ' + esc(x.what) + ' ' + esc(x.old) + ' → ' + esc(x.new);
+        }).join('<br>') + '</details>'
+      + '※ ノートの値が op.gg の最終的な値と一致するとは限りません'
+      + '（18.2・18.3 の本文の変更はすべて一致、18.2 のミッドパッチ3件は次のパッチでも op.gg に入らなかった）。'
+      + 'op.gg が更新されたら自動で op.gg の値に戻ります。' + ogModeled, true);
+  }
   /* ★ 理論値の数字そのものが古い（2026-09-24 追加）★
      スキル係数は op.gg から取っているので、パッチノートが出ても
      op.gg が更新されるまで数字は前の版のまま。9/23 はこれを出さずに
@@ -894,8 +947,27 @@ const cov = T.meta.ability_coverage;
   /* 何が古いかを分けて言う（レビュー #17）。確かめていないこと（オーグメントまで全部、など）は言わない。 */
   if(F.theory_is_stale){
     let h = '<b>パッチ ' + esc(F.notes_patch || '?') + ' の数字は、まだ一部しか入っていません。</b>';
+    const ogRow = function(x){
+      return esc(x.who) + ' ' + esc(x.what) + ' ' + esc(x.old) + '→' + esc(x.new) + '（' + esc(x.reason_ja) + '）';
+    };
     if(F.opgg_lag){
       h += 'スキル係数の元データ（op.gg）がまだ <b>' + esc(F.theory_patch || '版不明') + '</b> です。';
+      /* 何がノートの値で、何が前の値のままかを分けて言う（照合できなかった行を黙って消さない） */
+      if(OGV.length){
+        h += 'そのうちパッチノートに載っている ' + OGV.length + ' か所はノートの値で計算しています。';
+      }
+      if(OGN.length){
+        h += '次の ' + OGN.length + ' か所は照合できず、前の値のまま計算しています: '
+          + OGN.map(ogRow).join('／') + '。';
+      }
+      h += 'パッチノートに載っていない変更は、op.gg の更新まで入りません。';
+    } else {
+      /* op.gg の番号は追いついているのに、変更前の値が残っていて上書きできなかった行 */
+      const KS = OGN.filter(function(x){ return x.known_stale; });
+      if(KS.length){
+        h += 'op.gg にパッチノート前の値が残っているが上書きできない箇所があります: '
+          + KS.map(ogRow).join('／') + '。';
+      }
     }
     if((F.riot_stale || []).length){
       h += 'トレイト・基礎ステータスの元データ（Riot の配信データ）に、パッチノートで上書きできない'
@@ -904,6 +976,7 @@ const cov = T.meta.ability_coverage;
           }).join('／') + '）。';
     }
     h += '理論ダメージ・構成・配置は、この古い数字を含んだまま計算されています。元データが更新されると自動で取り直します。';
+    if(F.opgg_lag) h += ogModeled;
     put(h);
     return;
   }
@@ -1006,6 +1079,17 @@ function rollBadge(R, big){
     return s;
   }
   const lv = R.roll_level;
+  /* ★「リロールの形でない」（NEXT.md Y）★ 主役のコストは分かっているので「判定できない」とも
+     「どちらとも言える（?）」とも別物。何が足りないかを数字で添える。 */
+  if(R.shape === 'mismatch'){
+    const m = el('span','roll mismatch', jp(R.label));
+    if(!big) m.classList.add('rollmini');
+    m.title = [jp(R.summary||'')]
+      .concat((R.shape_fails||[]).map(function(f){ return '・'+jp(f.why); }))
+      .concat(['主役のコストだけで決めるならレベル'+R.axis_roll_level+'（回すレベルは出さない）'])
+      .join('\n');
+    return m;
+  }
   // label は Python が組み立てた「Lv7 リロール」。Lv を日本語にしてから出す
   const s = el('span','roll '+(lv ? 'lv'+lv : 'unknown'), jp(R.label) || '判定できない');
   if(!big) s.classList.add('rollmini');
@@ -1048,7 +1132,9 @@ function threeStarCell(R){
    呼ぶ側が1回だけ上位に出す約束になっている（rolllevel.ASSUMPTIONS）。
    ★ 未検証の前提を画面に出すのはこのツールの方針。畳むのは可、消すのは不可。 */
 function rollAssumptionsNote(){
-  const A = (T.meta && T.meta.roll_assumptions) || [];
+  /* ★ 2026-09-24 直した ★ 以前は存在しない T.meta.roll_assumptions を読んでいて、
+     前提が入っているのに常に「入っていない」と出ていた（build_app が書くのは meta.roll.assumptions）。 */
+  const A = (((T.meta||{}).roll||{}).assumptions) || [];
   const d = el('div','note');
   if(!A.length){
     d.innerHTML = '<b>ロール型の前提が data.js に入っていない。</b>'
@@ -1068,6 +1154,17 @@ function rollAssumptionsNote(){
   h += '<br>予算が変わると結論が変わる（50ゴールドなら全コストで★3は 0〜0.2%、'
      + '200ゴールドなら低コストは 83〜97%）。各構成の「★3」を押すと'
      + ' 50/100/150/200 ゴールドの曲線が出る。';
+  /* そのレベルで出せる最大コスト（NEXT.md Y）。上の前提（150g・枯れ25%・他者0人）から導いた表。 */
+  const FM = ((T.meta||{}).roll||{}).fieldable_max_cost;
+  if(FM){
+    h += '<br><b>レベルごとに「出せる」とみなす最大コスト</b>（★2 が '
+       + Math.round((((T.meta||{}).roll||{}).star3_feasible||0.5)*100)
+       + '% 以上そろう線・<span class="wtxt">未検証</span>）: '
+       + Object.keys(FM).map(Number).filter(function(l){ return l>=5 && l<=10; })
+           .map(function(l){ return 'レベル'+l+' → コスト'+FM[l]; }).join(' / ')
+       + '。リロール型（レベル6・7）は、回すレベルで出せる駒で盤面を組み、★3にする駒が '
+       + (((T.meta||{}).roll||{}).min_targets) + ' 体以上いるときだけ型を名乗る。';
+  }
   d.innerHTML = h;
   return d;
 }
@@ -1103,6 +1200,23 @@ function rollBlock(r){
   line.appendChild(el('span','dim',
     '盤面 レベル'+R.board_level+'（'+R.board_level+'体出す）'));
   box.appendChild(line);
+  /* 回す盤面（リロールの2段組みの1段目）と★3にする駒・レベルの筋書き（NEXT.md Y / W）。
+     どれも Python が出した値をそのまま出す。 */
+  const lvR = R.roll_level || R.axis_roll_level;
+  if((R.roll_board||[]).length){
+    const added = (r.units||[]).filter(function(n){ return R.roll_board.indexOf(n) < 0; });
+    box.appendChild(noteHTML('レベル'+lvR+' で回す盤面（'+R.roll_board.length+'体）: '
+      + R.roll_board.map(unameOf).join('・')
+      + ((R.roll_targets||[]).length ? '<br>★3 にする駒: ' + R.roll_targets.map(unameOf).join('・') : '')
+      + (added.length ? '<br>あとで足す: ' + added.map(unameOf).join('・') : '')));
+  } else if((R.roll_targets||[]).length){
+    box.appendChild(noteHTML('★3 にする駒（帯の駒）: ' + R.roll_targets.map(unameOf).join('・')));
+  }
+  if(R.plan && R.plan.headline)
+    box.appendChild(noteHTML('<b>筋書き</b>: ' + devHtml(R.plan.headline)));
+  if(r.top_dealer)
+    box.appendChild(noteHTML('この構成で一番火力を出すのは ' + unameOf(r.top_dealer)
+      + '（アイテム無し・モデル上の計算）' + (r.top_dealer === r.carry ? ' ── 主役自身' : '')));
 
   const grid = el('div');
   grid.style.cssText='display:flex;flex-wrap:wrap;gap:16px;margin-top:8px;align-items:center';
@@ -2850,7 +2964,8 @@ function drawRankComp(host){
   // 型で絞る。「今日は6リロールがやりたい」から入れるようにする。
   const rollSel=el('select');
   rollSel.appendChild(new Option('全部の型',''));
-  [[6,'レベル6 リロール'],[7,'レベル7 リロール'],[8,'レベル8'],[9,'レベル9'],['?','判定できない']]
+  [[6,'レベル6 リロール'],[7,'レベル7 リロール'],[8,'レベル8'],[9,'レベル9'],
+   ['x','リロールの形でない'],['?','判定できない']]
     .forEach(function(x){ rollSel.appendChild(new Option(x[1], String(x[0]))); });
   rollSel.value = rankRollBand;
   // select に無い列（柔軟枠など）で並べ替えたまま戻ってきたときは select を空にしない
@@ -2917,7 +3032,10 @@ function drawRankComp(host){
       all = all.filter(function(r){
         const R=rollOf(r);
         const lv = R ? R.roll_level : null;
-        return rankRollBand==='?' ? !lv : String(lv)===rankRollBand;
+        // 「リロールの形でない」は主役のコストが分かっている状態なので「判定できない」に混ぜない
+        const mis = !!(R && R.shape === 'mismatch');
+        if(rankRollBand==='x') return mis;
+        return rankRollBand==='?' ? (!lv && !mis) : String(lv)===rankRollBand;
       });
     }
     let rows=sinkMissing(sortRows(all, sort.rankComp, RCA), RCA[sort.rankComp.key]);
@@ -3339,10 +3457,11 @@ const POWER = (T.power && !T.power.error) ? T.power : null;
 const POWER_WEIGHT = POWER ? (POWER.weight || 0) : 0;
 const _growthGrid = {};   // apiName -> 1秒刻みの伸び
 
-function growthAt(api, sec){
-  let g = _growthGrid[api];
+function growthAt(api, sec, star3){
+  const gk = star3 ? api + '|3' : api;
+  let g = _growthGrid[gk];
   if(!g){
-    const curve = (POWER.units[api]||[])[2] || [[8,1]];
+    const curve = ((star3 ? (POWER.units3||{}) : POWER.units)[api]||[])[2] || [[8,1]];
     const lo = POWER.ladder[0], hi = POWER.horizon;
     g = [];
     for(let t=lo; t<=hi; t++){
@@ -3357,7 +3476,7 @@ function growthAt(api, sec){
       }
       g.push(v);
     }
-    _growthGrid[api] = g;
+    _growthGrid[gk] = g;
   }
   let idx = Math.floor(sec) - Math.floor(POWER.ladder[0]);
   if(idx < 0) idx = 0;
@@ -3367,25 +3486,34 @@ function growthAt(api, sec){
 
 /* 生贄にしてはいけない駒。solve() が軸と must を入れる（Python の _axis_keep）。 */
 let _sacrificeKeep = new Set();
-function boardPower(apis, acts){
+/* この解で★3として測る駒（Python の Solver._star3・NEXT.md Y）。solve() が opts.star3 から入れる。
+   ★3 の行（POWER.units3 / tiers3）はコスト1〜3 だけ焼いてあるので、行の無い駒は入れない。 */
+let _star3 = new Set();
+/* リロール盤面の「★3候補が足りない解」の減点条件（Python の Solver._roll_rule）。 */
+let _rollRule = null;
+function boardPower(apis, acts, detail){
   if(!POWER) return null;
+  const s3on = _star3.size > 0;
+  const U3 = POWER.units3 || {}, T3 = POWER.tiers3 || {};
   const dps = {};
   /* 耐久は駒ごとに持つ（Python と同じ）。合計だけだと、生贄にした駒が
      トレイトから貰った体力を盤面から外せない。 */
   const ehpBy = {};
   for(const a of apis){
-    const base = POWER.units[a];
+    const base = (s3on && _star3.has(a)) ? U3[a] : POWER.units[a];
     if(!base) return null;
     dps[a] = base[0];
     ehpBy[a] = base[1];
   }
-  // トレイトの段が各駒に足す差分。Python が (段, 駒) で焼いてある。
+  // トレイトの段が各駒に足す差分。Python が (段, 駒) で焼いてある（★3 の駒は tiers3）。
   acts.forEach(function(act){
     if(!act.style) return;
-    const per = POWER.tiers[act.name + '|' + act.minUnits];
-    if(!per) return;
+    const key = act.name + '|' + act.minUnits;
+    const per = POWER.tiers[key];
+    const per3 = s3on ? T3[key] : null;
+    if(!per && !per3) return;
     for(const a of apis){
-      const d = per[a];
+      const d = (s3on && _star3.has(a)) ? (per3 ? per3[a] : null) : (per ? per[a] : null);
       if(!d) continue;
       dps[a] += d[0];
       ehpBy[a] += d[1];
@@ -3441,13 +3569,20 @@ function boardPower(apis, acts){
   const seconds = ehp / POWER.incoming_dps;
   const t = Math.min(seconds, POWER.horizon);
   let boardDps = 0;
+  const contrib = detail ? {} : null;
   for(const a of live){
     if(dps[a] <= 0) continue;
-    boardDps += dps[a] * growthAt(a, t);
+    const v = dps[a] * growthAt(a, t, s3on && _star3.has(a));
+    boardDps += v;
+    if(detail) contrib[a] = v;
   }
-  return {value: Math.sqrt(t * boardDps), seconds: seconds, secondsUsed: t,
+  const out = {value: Math.sqrt(t * boardDps), seconds: seconds, secondsUsed: t,
           capped: seconds > POWER.horizon, boardDps: boardDps, boardEhp: ehp,
           slotsLost: lost, sacrifice: sacrifice};
+  /* detail のときだけ駒ごとの項（Python の board_power(detail=True) の contrib と同じ）。
+     dps は段を足したあと・伸びを掛ける前の値（「強み」の行が段の取り分を出すのに使う）。 */
+  if(detail){ out.contrib = contrib; out.dps = dps; out.live = live; }
+  return out;
 }
 
 /* 「中央値の駒を size 体並べただけの盤面」を 1.0 とする基準。
@@ -3508,14 +3643,40 @@ function scoreOf(apis, axisTraits, axisWeight){
 /* 軸（使いたい駒）を必ず含む構成を上位 top 件返す。
    ★ 第1引数はキャリーではなく「軸」★ 前衛でも後衛でも扱いは同じ。
    位置引数の呼び出しは無改修で動く（Python 側と同じ扱い）。
-   opts.axisWeight（旧 carryWeight）・NO_AXIS_TRAIT_PENALTY に名前を合わせてある。 */
+   opts.axisWeight（旧 carryWeight）・NO_AXIS_TRAIT_PENALTY に名前を合わせてある。
+   opts.star3 … この解で★3として測る駒（既定は空＝全員★2）。
+   画面の「キャラから構成」は solveForAxis を通すこと（NEXT.md Y/Z）。 */
 function solve(axisApi, size, opts){
   opts=opts||{};
-  const beam=opts.beam||240, top=opts.top||3;
+  const top=opts.top||3;
+  const c=_candidates(axisApi, size, opts, top*4);
+  return c.slice(0, top).map(function(r){ return resultFromUnits(r.arr, axisApi, r.s, opts); });
+}
+
+/* 探索が比べる値。scoreOf に「リロール盤面の★3候補が足りない」減点を足したもの
+   （Python の Solver._obj と同じ）。盤面が s1 体そろったときだけ掛ける。 */
+function objOf(apis, axisTraits, axisWeight){
+  let s = scoreOf(apis, axisTraits, axisWeight);
+  const r = _rollRule;
+  if(r && apis.length === r.s1){
+    let n = 0;
+    for(const a of apis) if(r.band.has(UNIT_MAP[a].cost)) n++;
+    if(n < r.need) s -= r.pen;
+  }
+  return s;
+}
+
+/* 探索の本体（Python の Solver._candidates）。重複を除いた {s, arr} を点の高い順に全部返す。 */
+function _candidates(axisApi, size, opts, nStarts){
+  opts=opts||{};
+  const beam=opts.beam||240;
   const axisWeight=opts.axisWeight||opts.carryWeight||2.0;
   const banned=new Set(opts.exclude||[]);
   const must=new Set(opts.must||[]);
   _sacrificeKeep = new Set([axisApi].concat(opts.must||[]));
+  _star3 = new Set((opts.star3||[]).filter(function(a){
+    return POWER && POWER.units3 && POWER.units3[a]; }));
+  _rollRule = opts.rollRule || null;
   const axis=UNIT_MAP[axisApi];
   const axisTraits=new Set(axis.traits);
   const pool=T.units.filter(u=>!banned.has(u.apiName));
@@ -3535,7 +3696,7 @@ function solve(axisApi, size, opts){
         if(st.indexOf(cand.apiName)>=0||conflicts(st,cand)) continue;
         const ns=st.concat([cand.apiName]).sort();
         const key=ns.join('|');
-        if(!nxt.has(key)) nxt.set(key,{arr:ns,s:scoreOf(ns,axisTraits,axisWeight)});
+        if(!nxt.has(key)) nxt.set(key,{arr:ns,s:objOf(ns,axisTraits,axisWeight)});
       }
     }
     if(!nxt.size) break;
@@ -3580,7 +3741,7 @@ function solve(axisApi, size, opts){
           for(let i=0; i<pool.length; i++){
             const c = pool[i], a = c.apiName;
             if(cur.indexOf(a) >= 0 || conflicts(cur, c)) continue;
-            const sc = scoreOf(cur.concat([a]).sort(), axisTraits, axisWeight);
+            const sc = objOf(cur.concat([a]).sort(), axisTraits, axisWeight);
             if(bestS === null || sc > bestS){ best = a; bestS = sc; }
           }
           if(best === null) break;
@@ -3594,13 +3755,13 @@ function solve(axisApi, size, opts){
       const key = st.join('|');
       if(seen[key]) return;
       seen[key] = 1;
-      uniq.push({arr: st, s: scoreOf(st, axisTraits, axisWeight)});
+      uniq.push({arr: st, s: objOf(st, axisTraits, axisWeight)});
     });
     uniq.sort(function(a,b){ return b.s - a.s; });
     return uniq.slice(0, SEED_KEEP).map(function(x){ return x.arr; });
   }
 
-  const starts = states.slice(0, top*4);
+  const starts = states.slice(0, nStarts);
   tierSeeds().forEach(function(sd){
     const key = sd.join('|');
     if(!starts.some(function(x){ return x.join('|') === key; })) starts.push(sd);
@@ -3608,7 +3769,7 @@ function solve(axisApi, size, opts){
 
   const results=[];
   for(const st of starts){
-    let cur=st.slice(), curS=scoreOf(cur,axisTraits,axisWeight), improved=true, rounds=0;
+    let cur=st.slice(), curS=objOf(cur,axisTraits,axisWeight), improved=true, rounds=0;
     while(improved && rounds<12){
       improved=false; rounds++;
       for(const outA of cur.slice()){
@@ -3618,7 +3779,7 @@ function solve(axisApi, size, opts){
         for(const cand of pool){
           if(rest.indexOf(cand.apiName)>=0||conflicts(rest,cand)) continue;
           const ns=rest.concat([cand.apiName]).sort();
-          const s=scoreOf(ns,axisTraits,axisWeight);
+          const s=objOf(ns,axisTraits,axisWeight);
           if(s>curS+1e-9){ cur=ns; curS=s; improved=true; done=true; break; }
         }
         if(done) break;
@@ -3632,26 +3793,215 @@ function solve(axisApi, size, opts){
     const key=r.arr.join('|');
     if(seen.has(key)) continue;
     seen.add(key);
-    const acts=activated(r.arr);
-    best.push({
-      score:Math.round(r.s*100)/100,
-      units:r.arr.map(a=>UNIT_MAP[a]).sort((x,y)=>y.cost-x.cost||x.name.localeCompare(y.name)),
-      totalCost:r.arr.reduce((s,a)=>s+UNIT_MAP[a].cost,0),
-      active:acts.filter(a=>a.style),
-      dead:acts.filter(a=>!a.style && a.needs>0 && a.needs<=2),
-      gated:acts.filter(a=>a.gatedBy),
-      // carry / carryApi は互換のため残す。中身は軸。
-      carryApi:axisApi,
-      carry:axis.name,
-      axis:axis.name,
-      axisApi:axisApi,
-      axisKind:axisKind(axis),
-      axisTraits:axis.traits.length,
-      axisTraitsHit:acts.filter(a=>a.style && axisTraits.has(a.name)).length
-    });
-    if(best.length>=top) break;
+    best.push({s:r.s, arr:r.arr});
   }
   return best;
+}
+
+/* 解1件を画面が読む形にする（従来の solve() の戻り値そのまま）。 */
+function resultFromUnits(arr, axisApi, s){
+  const axis=UNIT_MAP[axisApi];
+  const axisTraits=new Set(axis.traits);
+  const acts=activated(arr);
+  return {
+    score:Math.round(s*100)/100,
+    units:arr.map(a=>UNIT_MAP[a]).sort((x,y)=>y.cost-x.cost||x.name.localeCompare(y.name)),
+    totalCost:arr.reduce((t,a)=>t+UNIT_MAP[a].cost,0),
+    active:acts.filter(a=>a.style),
+    dead:acts.filter(a=>!a.style && a.needs>0 && a.needs<=2),
+    gated:acts.filter(a=>a.gatedBy),
+    // carry / carryApi は互換のため残す。中身は軸。
+    carryApi:axisApi,
+    carry:axis.name,
+    axis:axis.name,
+    axisApi:axisApi,
+    axisKind:axisKind(axis),
+    axisTraits:axis.traits.length,
+    axisTraitsHit:acts.filter(a=>a.style && axisTraits.has(a.name)).length
+  };
+}
+
+/* ================= キャラから構成の案（NEXT.md Y / Z）=================
+   Python の rolllevel.solve_for_axis → Solver.solve_plans と**同じ手順**（tests/solver_parity.js）。
+   ユーザー（Y）:「キャラを選んだ時に、そのキャラが主軸になる構成にしてほしい」
+     → 選んだ案 ②「先にレベル6で揃う6体を組んでから8体に広げる作り方」
+   ユーザー（Z）:「オーンとかを選んだ時には…3案ともに違うキャリーでの構成を考えて対案する形に」
+   規則（誰が何レベルで出せるか・★3にする帯・★3候補の最小数）は T.meta.roll、
+   仕組みの定数（減点・回す盤面を何件まで広げるか・最小の違い）は T.meta.solver から読む。
+   ★ ここで規則を書き直さない ★（「2か所に規則を書くと必ずずれる」） */
+const SB = (T.meta && T.meta.solver) || {};
+const ROLL_META = (T.meta && T.meta.roll) || {};
+function rerollRuleFor(cost){
+  const L = (ROLL_META.carry_cost_to_type||{})[String(cost)];
+  const t = L ? (ROLL_META.types||{})[String(L)] : null;
+  const fm = ROLL_META.fieldable_max_cost;
+  if(!t || t.star_target !== 3 || !fm || ROLL_META.min_targets == null
+     || SB.roll_target_penalty == null || SB.roll_boards_max == null) return null;
+  const fieldMax = {};
+  Object.keys(fm).forEach(function(k){ fieldMax[+k] = fm[k]; });
+  return {level:L, band:t.band, fieldMax:fieldMax, minTargets:ROLL_META.min_targets};
+}
+/* 焼いた規則が無い古い data.js。黙って従来の解に戻さず、画面で警告する。 */
+function rollRegistryMissing(){
+  return !ROLL_META.fieldable_max_cost || SB.roll_target_penalty == null
+      || SB.diverse_min_diff == null;
+}
+function _setStar3(apis){
+  _star3 = new Set((apis||[]).filter(function(a){
+    return POWER && POWER.units3 && POWER.units3[a]; }));
+}
+
+/* 案の候補を良い順に1件ずつ出す（Python の Solver.iter_plans）。 */
+function* iterPlans(axisApi, size, exclude, reroll, nStarts){
+  if(!reroll){
+    const info = {mode:'standard', keep:[axisApi], star3:[]};
+    for(const c of _candidates(axisApi, size, {exclude:exclude}, nStarts))
+      yield {s:c.s, arr:c.arr, info:info};
+    return;
+  }
+  const L = reroll.level, band = new Set(reroll.band), fmax = reroll.fieldMax;
+  const need = reroll.minTargets, s1 = Math.min(L, size);
+  const maxLv = Math.max.apply(null, Object.keys(fmax).map(Number));
+  const fmaxAt = function(lv){ return fmax[Math.min(lv, maxLv)]; };
+  // 1段目: Lv L で出せる駒だけで L 体。帯の駒は★3で測り、帯の駒が足りない盤面は減点。
+  const ex1 = new Set(exclude);
+  T.units.forEach(function(u){ if(u.cost > fmaxAt(L)) ex1.add(u.apiName); });
+  const star31 = T.units.filter(function(u){ return band.has(u.cost) && !ex1.has(u.apiName); })
+    .map(function(u){ return u.apiName; });
+  const c1 = _candidates(axisApi, s1, {exclude:Array.from(ex1), star3:star31,
+    rollRule:{band:band, s1:s1, need:need, pen:SB.roll_target_penalty}}, nStarts);
+  const axisTraits = new Set(UNIT_MAP[axisApi].traits);
+  const seen = new Set();
+  for(const r1 of c1.slice(0, SB.roll_boards_max)){
+    const rb = r1.arr;
+    const targets = rb.filter(function(a){ return band.has(UNIT_MAP[a].cost); }).sort();
+    let s, fin, keep;
+    if(size > s1){
+      // 2段目: 回す盤面を固定して size 体へ。足す駒は Lv size で出せる駒だけ。
+      const ex2 = new Set(exclude);
+      T.units.forEach(function(u){ if(u.cost > fmaxAt(size)) ex2.add(u.apiName); });
+      rb.forEach(function(a){ ex2.delete(a); });
+      const c2 = _candidates(axisApi, size, {exclude:Array.from(ex2),
+        must:rb.filter(function(a){ return a !== axisApi; }).sort(), star3:targets}, 4);
+      if(!c2.length) continue;
+      s = c2[0].s; fin = c2[0].arr; keep = rb.slice();
+    } else {
+      // 盤面が L 体以下なら回す盤面がそのまま最終形。点は減点を外して付け直す。
+      _sacrificeKeep = new Set([axisApi]);
+      _setStar3(targets);
+      _rollRule = null;
+      s = scoreOf(rb, axisTraits, 2.0); fin = rb; keep = [axisApi];
+    }
+    const key = fin.join('|');
+    if(seen.has(key)) continue;
+    seen.add(key);
+    yield {s:s, arr:fin, info:{mode:'reroll', keep:keep, star3:targets, level:L, s1:s1,
+      board:rb, targets:targets, minTargets:need,
+      shapeOk: rb.length === s1 && targets.length >= need}};
+  }
+}
+
+/* 盤面の秒間ダメージへの寄与で駒を並べる（Python の Solver.dealers）。アイテム無しのモデル。 */
+function dealersFrom(bp, axisApi){
+  if(!bp || !bp.contrib) return null;
+  const c = bp.contrib, total = bp.boardDps || 0;
+  const r6 = function(v){ return Math.round(v * 1e6) / 1e6; };
+  const order = Object.keys(c).sort(function(x, y){
+    const vx = r6(c[x]), vy = r6(c[y]);
+    if(vx !== vy) return vy - vx;
+    return x < y ? -1 : (x > y ? 1 : 0);
+  });
+  const rec = function(a){
+    const u = UNIT_MAP[a];
+    return {apiName:a, name:u.name, cost:u.cost, kind:axisKind(u),
+            share: total ? Math.round(c[a] / total * 1000) / 1000 : null};
+  };
+  const others = order.filter(function(a){ return a !== axisApi; });
+  const ar = order.indexOf(axisApi);
+  return {topDealer: order.length ? rec(order[0]) : null,
+          carry: others.length ? rec(others[0]) : null,
+          second: others.length > 1 ? rec(others[1]) : null,
+          axisRank: ar >= 0 ? ar + 1 : null};
+}
+
+/* 候補1件を画面の形にする（Python の Solver._plan）。星と生贄の条件をその候補のものに戻して数える。 */
+function _planOf(axisApi, it){
+  const info = it.info;
+  _sacrificeKeep = new Set(info.keep);
+  _setStar3(info.star3);
+  _rollRule = null;
+  const r = resultFromUnits(it.arr, axisApi, it.s);
+  r.mode = info.mode;
+  r.star3 = (info.star3||[]).slice();
+  if(info.mode === 'reroll'){
+    const t = (ROLL_META.types||{})[String(info.level)] || {};
+    const sh = (ROLL_META.shapes||{}).mismatch || {};
+    r.rollPlan = {level:info.level, boardSize:info.s1, board:info.board.slice(),
+      targets:info.targets.slice(),
+      added:it.arr.filter(function(a){ return info.board.indexOf(a) < 0; }),
+      minTargets:info.minTargets, shapeOk:info.shapeOk,
+      label: info.shapeOk ? t.label : sh.label,
+      summary: info.shapeOk ? t.summary : sh.summary};
+  }
+  r.bp = boardPower(it.arr, activated(it.arr), true);
+  r.dealers = dealersFrom(r.bp, axisApi);
+  return r;
+}
+
+function sharedCount(a, b){
+  const s = new Set(b); let n = 0;
+  a.forEach(function(x){ if(s.has(x)) n++; });
+  return n;
+}
+
+/* 案を1件ずつ出す（Python の Solver.solve_plans）。前衛の軸は3案をそれぞれ違うキャリーで組む。
+   案2・案3 は「それまでの案のキャリーを使わない条件での最良」なので、並べ替えない。 */
+function* solveForAxisSteps(axisApi, size, opts){
+  opts = opts||{};
+  const top = opts.top||3, nStarts = top*4;
+  const u = UNIT_MAP[axisApi];
+  const reroll = rerollRuleFor(u.cost);
+  const diverse = axisKind(u) === 'front' && SB.diverse_min_diff != null;
+  const exclude = Array.from(opts.exclude||[]);
+  if(!diverse){
+    let n = 0;
+    for(const it of iterPlans(axisApi, size, exclude, reroll, nStarts)){
+      yield _planOf(axisApi, it);
+      if(++n >= top) return;
+    }
+    return;
+  }
+  const minDiff = SB.diverse_min_diff;
+  const chosen = [], without = [];
+  const ex = new Set(exclude);
+  const maxShared = function(arr){
+    return chosen.length ? Math.max.apply(null, chosen.map(function(c){ return sharedCount(arr, c); })) : 0;
+  };
+  for(let step = 1; step <= top; step++){
+    let pick = null, first = null;
+    for(const it of iterPlans(axisApi, size, Array.from(ex).sort(), reroll, nStarts)){
+      if(!first) first = it;
+      if(maxShared(it.arr) <= size - minDiff){ pick = it; break; }
+    }
+    let tooSimilar = false;
+    if(!pick){
+      if(!first) return;
+      pick = first; tooSimilar = true;
+    }
+    const r = _planOf(axisApi, pick);
+    r.diverse = {step:step, without:without.slice(), sharedMax:maxShared(pick.arr),
+                 tooSimilar:tooSimilar};
+    yield r;
+    const cy = r.dealers && r.dealers.carry;
+    if(!cy) return;
+    chosen.push(pick.arr);
+    const bn = baseName(cy.name);
+    without.push(bn);
+    T.units.forEach(function(x){ if(baseName(x.name) === bn) ex.add(x.apiName); });
+  }
+}
+function solveForAxis(axisApi, size, opts){
+  return Array.from(solveForAxisSteps(axisApi, size, opts));
 }
 
 /* ================= アイテム推奨（JS 側の再実装は撤去した） =================
@@ -5039,14 +5389,379 @@ let axisSel=carrySel;
 let carrySize=8;
 const carryExclude=new Set();
 
-/* この軸に対応する構成データ（型・★3・アイテム）があるか。
-   ★ 型の判定を JS で作り直さない ★ 規則を2か所に書くと必ずずれる。
-   forecast に同じ軸の行があるときだけ、その行の roll をそのまま出す。 */
-function rollForAxis(api){
-  const rows = ((T.forecast||{}).rows)||[];
-  const hit = rows.filter(function(r){ return r.carryApi===api; })[0];
-  return hit || null;
+/* ★ キャラから構成の型は各案の解から付ける（NEXT.md Y）★
+   以前は forecast 行（別の解）の型を見出しに出していたので、
+   ・forecast に行が無い軸（74軸中32軸・Caitlyn を含む）は型が出なかった
+   ・見出しが下の案と違う構成を説明することがあった（Rakan）
+   いまは各案の解（solveForAxis）が持つ「回す盤面」と形の旗から札を付ける。
+   型の名前と規則は T.meta.roll（Python の正本）を読むだけで、判定を作り直さない。 */
+let _carryRunToken = 0;
+/* 前衛の3案の「強み」の線引き（NEXT.md Z）。モデルの盤面火力の誤差
+   （31構成で最大 9.20%・comps.py の実測）より小さい差で「一番」と言わないための 10%。
+   線そのものは設計判断で**未検証**。 */
+const STRENGTH_MIN_LEAD = 0.10;
+const NEAR_TIE = 0.10;
+function pct1(x){ return (Math.round(x*1000)/10) + '%'; }
+
+/* 案の札。型の名前 or「リロールの形でない」。足りないものは案自身の解の数字で言う。 */
+function planRollBadge(rp){
+  const ok = rp.shapeOk;
+  const s = el('span', 'roll ' + (ok ? 'lv' + rp.level : 'mismatch'), jp(rp.label || ''));
+  const bits = [jp(rp.summary || '')];
+  if(!ok){
+    if(rp.board.length < rp.boardSize)
+      bits.push('・レベル'+rp.level+' で出せる駒が '+rp.board.length+'体しかそろわない（要 '+rp.boardSize+'体）');
+    if(rp.targets.length < rp.minTargets)
+      bits.push('・★3にする駒が '+rp.targets.length+'体（要 '+rp.minTargets+'体）');
+  }
+  s.title = bits.join('\n');
+  return s;
 }
+
+/* 軸そのものの見出し。型は主役のコストだけで決まる部分（表を引くだけ）。 */
+function carryHeader(api, first){
+  const axis = UNIT_MAP[api];
+  const hd = el('div','card');
+  hd.style.position='static'; hd.style.maxHeight='none'; hd.style.marginBottom='12px';
+  const h1 = el('h2');
+  h1.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap';
+  h1.appendChild(unitIcon(axis,28));
+  h1.appendChild(document.createTextNode(uname(axis)+'（コスト'+axis.cost+'）を軸にした構成'));
+  const kind = first.axisKind || axisKind(axis);
+  const kb = el('span','badge '+(kind==='unknown'?'warn':'off'), AXIS_KIND_LABEL[kind]);
+  kb.title = kind==='unknown'
+    ? 'op.gg の役割名（リーパー / スペシャリストなど）では前衛か後衛か決まらず、'
+      + '射程2以下なので射程でも決めていない。射程1でキャリーをやる駒がここに入る。'
+    : '役割 '+roleJa(axis.role)+' から判定（表に無ければ射程3以上を後衛とする）';
+  h1.appendChild(kb);
+  h1.appendChild(backlineTag(axis));
+  hd.appendChild(h1);
+  hd.appendChild(el('div','note',
+    '軸のトレイト: '+axis.traits.map(tnameOf).join(' / ')
+    + '　この案で発動しているのは '+first.axisTraitsHit+' / '+first.axisTraits+'。'));
+  if(first.axisTraitsHit===0)
+    hd.appendChild(noteHTML('<b>この案では軸のトレイトが1つも発動していない。</b>'
+      + '軸を置く意味が薄い解なので、盤面サイズを変えるか除外を見直すこと。','var(--bad)'));
+  // 型（主役のコストだけで決まる部分）。案ごとの札は各案に出す。
+  const L = (ROLL_META.carry_cost_to_type||{})[String(axis.cost)];
+  const t = L ? (ROLL_META.types||{})[String(L)] : null;
+  if(t){
+    const ol = (ROLL_META.outlook||{})[axis.cost+'-'+L];
+    let h = uname(axis)+' はコスト'+axis.cost+' → <b>'+jp(t.label)+'</b> の駒（'+jp(t.summary)+'）。';
+    if(ol && ol.p_3star != null)
+      h += '<br>レベル'+L+' で'+(ROLL_META.gold||150)+'ゴールド回して★3（9枚）がそろう確率 <b>'
+         + pct1(ol.p_3star)+'</b> / ★2 '+pct1(ol.p_2star||0)
+         + '（保有0枚から。前提は下の「前提と注記」・<span class="wtxt">未検証</span>を含む）';
+    h += t.star_target===3
+      ? '<br>各案の札は、その案の「回す盤面」が型の形になっているかで付けている'
+        + '（形になっていなければ「リロールの形でない」）。'
+      : '<br>コスト4・5 は★2 で戦う型なので、案ごとの形の確かめはしていない（型は見出しだけ）。';
+    hd.appendChild(noteHTML(h));
+  } else {
+    hd.appendChild(noteHTML('コスト'+axis.cost+' の型が data.js の表（meta.roll）に無いので型を出さない。'
+      + '<code>python -m src.build_app</code> で再生成する。', 'var(--warn)'));
+  }
+  if(rollRegistryMissing())
+    hd.appendChild(noteHTML('<b>data.js が古い。</b>リロールの2段組み・前衛の3案の規則（meta.roll / '
+      + 'meta.solver）が入っていないので、案は従来の解き方で出している。'
+      + '<code>python -m src.build_app</code> で再生成する。', 'var(--warn)'));
+  return hd;
+}
+
+/* 案1枚。表・発動中のトレイトは従来どおり。型の札・回す盤面・一番火力を出す駒を足した。 */
+function carryCard(r, i, api){
+  const c=el('div','card');
+  c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
+  const ch=el('h2');
+  ch.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap';
+  ch.appendChild(document.createTextNode(
+    '案'+(i+1)+'　スコア '+r.score+'　合計コスト '+r.totalCost));
+  if(r.rollPlan) ch.appendChild(planRollBadge(r.rollPlan));
+  // この案のコスト分布（数えているだけ）。
+  const dd2=el('span','dist');
+  const cc2={};
+  r.units.forEach(function(u){ cc2[u.cost]=(cc2[u.cost]||0)+1; });
+  [1,2,3,4,5].forEach(function(k){
+    if(!cc2[k]) return;
+    dd2.appendChild(costChip(k));
+    dd2.appendChild(el('span','n','×'+cc2[k]));
+  });
+  ch.appendChild(dd2);
+  c.appendChild(ch);
+
+  // ---- 回す盤面（NEXT.md Y）----
+  const rp = r.rollPlan;
+  if(rp){
+    const nm = function(a){ return uname(UNIT_MAP[a]); };
+    let h = 'レベル'+rp.level+' で回す盤面（'+rp.board.length+'体）: <b>'+rp.board.map(nm).join('・')+'</b>'
+      + '<br>★3 にする駒: '+(rp.targets.length ? rp.targets.map(nm).join('・') : 'なし');
+    if(rp.added.length)
+      h += '<br>レベル'+r.units.length+' で足す: '+rp.added.map(nm).join('・');
+    c.appendChild(noteHTML(h, rp.shapeOk ? null : 'var(--warn)'));
+  }
+  // ---- キャリー（前衛の3案・NEXT.md Z）/ 一番火力を出す駒（NEXT.md Y）----
+  const d = r.dealers;
+  if(r.diverse && d && d.carry){
+    c.dataset.carry = d.carry.apiName;
+    const cu = UNIT_MAP[d.carry.apiName];
+    const w = el('div','note');
+    w.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center';
+    w.appendChild(el('b',null,'キャリー（モデル上）: '));
+    w.appendChild(unitIcon(cu, 20));
+    w.appendChild(document.createTextNode(uname(cu)+'（コスト'+d.carry.cost+'・'
+      + AXIS_KIND_LABEL[d.carry.kind]+'）盤面火力の'+pct1(d.carry.share||0)));
+    if(d.second && d.carry.share && (d.carry.share - d.second.share)/d.carry.share < NEAR_TIE){
+      const b = el('span','badge warn','次点 '+uname(UNIT_MAP[d.second.apiName])+' '+pct1(d.second.share)+' と僅差');
+      b.title = '差が '+Math.round(NEAR_TIE*100)+'% 未満。モデルの誤差の範囲なので、どちらがキャリーかは言い切れない';
+      w.appendChild(b);
+    }
+    const hits = ((cu.ability||{}).hits_per_cast)||1;
+    if(hits > 1){
+      const b = el('span','badge off', hits+'発前提');
+      b.title = 'モデルはこの駒のスキルを1回 '+hits+'発当たる前提で数えている（combat.py の hits_per_cast）。'
+        + '全部当たらなければ火力はこれより低い';
+      w.appendChild(b);
+    }
+    if(d.axisRank === 1) w.appendChild(el('span','badge off','火力1位は軸の'+uname(UNIT_MAP[api])+'自身'));
+    c.appendChild(w);
+    const st = el('div','note strength');   // 強み。全案がそろってから埋める
+    st.textContent = '強み: （3案がそろってから比べる）';
+    c.appendChild(st);
+    if(r.diverse.step >= 2){
+      const cond = el('div','note');
+      if(r.diverse.tooSimilar){
+        cond.innerHTML = '既出の案と '+r.diverse.sharedMax+'体同じ（'+SB.diverse_min_diff
+          + '体以上違う候補が無かった）';
+        cond.style.color = 'var(--warn)';
+      } else cond.classList.add('dim');
+      c.appendChild(cond);
+    }
+  } else if(d && d.topDealer){
+    const axisU = UNIT_MAP[api];
+    let h;
+    if(d.topDealer.apiName === api)
+      h = 'アイテム無しの計算でも軸の '+uname(axisU)+' が一番火力を出す（盤面火力の'+pct1(d.topDealer.share||0)+'）';
+    else
+      h = 'この案で一番火力を出すのは <b>'+uname(UNIT_MAP[d.topDealer.apiName])+'</b>'
+        + '（盤面火力の'+pct1(d.topDealer.share||0)+'・アイテム無しの計算）。軸の '+uname(axisU)
+        + (d.axisRank ? ' は '+d.axisRank+' 番目' : ' は火力の計算に入っていない（秒間ダメージ0）')
+        + '。アイテムを持たせた評価は入っていない';
+    c.appendChild(noteHTML(h));
+  }
+
+  const tbl=el('table'), th=el('thead'), htr=el('tr');
+  ['コスト','ユニット','トレイト','通常攻撃の秒間ダメージ 2★','実効体力 2★',''].forEach(function(x){
+    const e=el('th',null,x); e.style.cursor='default'; htr.appendChild(e);});
+  th.appendChild(htr); tbl.appendChild(th);
+  const tb=el('tbody');
+  r.units.forEach(function(u){
+    const tr=el('tr');
+    const c1=el('td'); c1.appendChild(costChip(u.cost)); tr.appendChild(c1);
+    const c2=el('td');
+    c2.style.cssText='display:flex;align-items:center;gap:7px';
+    c2.appendChild(unitIcon(UNIT_MAP[u.apiName]||u, 26));
+    if(u.apiName===r.axisApi){
+      const b=el('b'); b.appendChild(unitNameNode(u));
+      b.appendChild(document.createTextNode(' ★軸'));
+      b.style.color='var(--accent)'; c2.appendChild(b);
+    } else {
+      // 軸以外の駒も押せる。「この壁いいな」と思ったらそこから引き直せる。
+      const sw=el('span'); sw.style.cursor='pointer';
+      sw.title=u.name+' — 押すとこの駒を軸にし直す';
+      sw.appendChild(unitNameNode(u));
+      sw.onclick=function(e){ e.stopPropagation(); focusUnit(u.apiName); };
+      c2.appendChild(sw);
+    }
+    // ★3 で測った駒（回す盤面の帯の駒）。表の星は★2 の値のままなので印だけ付ける。
+    if((r.star3||[]).indexOf(u.apiName) >= 0){
+      const s3=el('span','badge off','★3');
+      s3.title='この案の実戦力はこの駒を★3 として測っている（表の数字は★2）';
+      c2.appendChild(s3);
+    }
+    tr.appendChild(c2);
+    const c3=el('td','wrap');
+    u.traits.forEach(function(t){
+      let on=false;
+      r.active.forEach(function(a){ if(a.name===t) on=true; });
+      const tg=el('span','tag'+(on?' hit':''),tnameOf(t));
+      tg.title=t;
+      c3.appendChild(tg);
+    });
+    tr.appendChild(c3);
+    tr.appendChild(el('td','num',fmt(u.stars['2'].auto_dps)));
+    tr.appendChild(el('td','num',fmt(u.stars['2'].ehp_p)));
+    const c6=el('td');
+    if(u.apiName!==r.axisApi){
+      const x=el('button',null,'除外');
+      x.style.cssText='background:var(--panel2);color:var(--dim);border:1px solid var(--line);border-radius:4px;padding:0 6px;cursor:pointer;font-size:11px';
+      x.onclick=function(e){ e.stopPropagation(); carryExclude.add(u.apiName); render(); };
+      c6.appendChild(x);
+    }
+    tr.appendChild(c6);
+    tb.appendChild(tr);
+  });
+  tbl.appendChild(tb);
+  const w=el('div','tablewrap'); w.appendChild(tbl); c.appendChild(w);
+
+  const act=el('div'); act.style.marginTop='10px';
+  act.appendChild(el('span','dim','発動中： '));
+  r.active.forEach(function(a){
+    const s=el('span','tag hit',tnameOf(a.name)+' ('+a.minUnits+')');
+    const vars=Object.keys(a.variables||{}).map(function(k){
+      return termLabel(k)+'='+fmt(a.variables[k]);}).join(', ');
+    s.title=a.name+(vars?('\n'+vars):'');
+    // ★ 同じ人数で複数の段が同時に成立するトレイト（Set18 では Rival だけ）★
+    // 採る段は変えていない。どちらが強いかはデータからは決まらないので、
+    // 「別の段も成立している」ことだけ出して人が判断する。
+    if((a.alsoMatching||[]).length){
+      const b=el('span','badge warn','段2つ');
+      b.title='同じ人数で別の段も成立している: '
+        + a.alsoMatching.map(function(x){
+            return x.minUnits+'〜'+(x.maxUnits==null?'∞':x.maxUnits)
+                 +'体 階級'+x.style; }).join(' / ')
+        + '\n採っているのは '+a.minUnits+'体の段（階級'+a.style+'）。'
+        + 'どちらが強いかはデータからは決まらない。';
+      s.appendChild(b);
+    }
+    if(a.tierGap){
+      const b=el('span','badge bad','段の穴');
+      b.title='どの段の人数範囲にも入っていないので、下の段で表示している';
+      s.appendChild(b);
+    }
+    act.appendChild(s);
+  });
+  c.appendChild(act);
+  if(r.dead.length){
+    const dd=el('div','note');
+    dd.textContent='あと少しで届くトレイト： '+r.dead.map(function(a){
+      return tnameOf(a.name)+' あと'+a.needs+'体';}).join('  /  ');
+    c.appendChild(dd);
+  }
+  // オーグメント前提で数えなかった段。消すと「なぜ点かないのか」が分からない。
+  if((r.gated||[]).length){
+    c.appendChild(noteHTML('<b>オーグメント前提なので数えていない段: </b>'
+      + r.gated.map(function(a){
+          return tnameOf(a.name)+' を '+a.count+'体（'+a.gatedAt
+               + '体以上の段はオーグメント「'+anameOf(a.gatedBy)+'」を'
+               + '取って初めて成立する）';
+        }).join(' / ')
+      + '。取っている場合は、この構成の評価はここに書いてある分だけ低く出ている。',
+      'var(--warn)'));
+  }
+  return c;
+}
+
+/* 前衛の3案の「強み」（NEXT.md Z）。画面の表示だけ（Python に対応物は無い）。
+   T1: 3枠以上捧げた段のうち、盤面の火力／耐久の取り分が一番大きい段（取り分であって増分ではない）
+   T3: この案だけで点く段（ほかの案に同じ段以上が無いもの・T1 の段は除く）
+   T2: 並んだ案の中で一番のもの（10% 以上の差があるときだけ）。無ければ「一番になる項目は無い」 */
+function strengthParts(r, all, idx){
+  const parts = [];
+  const bp = r.bp;
+  if(!bp || !POWER) return ['実戦力の表が無いので数字で強みを出せない'];
+  const cmin = ROLL_META.core_tier_min_units;
+  let t1key = null;
+  if(cmin != null){
+    const s3 = new Set(r.star3||[]);
+    let dsum = 0;
+    bp.live.forEach(function(a){ dsum += Math.max(bp.dps[a]||0, 0); });
+    let best = null;
+    r.active.forEach(function(a){
+      if(!a.style || FREE_TRAITS.has(a.name) || (a.minUnits||0) < cmin) return;
+      const key = a.name+'|'+a.minUnits;
+      let dd = 0, ee = 0;
+      bp.live.forEach(function(u){
+        const tbl = s3.has(u) ? ((POWER.tiers3||{})[key]||{}) : (POWER.tiers[key]||{});
+        const x = tbl[u];
+        if(x){ dd += x[0]; ee += x[1]; }
+      });
+      const cand = {name:a.name, n:a.minUnits,
+                    dsh: dsum>0 ? dd/dsum : 0, esh: bp.boardEhp>0 ? ee/bp.boardEhp : 0};
+      cand.m = Math.max(cand.dsh, cand.esh);
+      if(!best || cand.m > best.m || (cand.m === best.m && (cand.n > best.n
+         || (cand.n === best.n && cand.name < best.name)))) best = cand;
+    });
+    if(best){
+      t1key = best.name+'|'+best.n;
+      const tn = tnameOf(best.name)+best.n;
+      if(best.esh >= best.dsh && best.esh > 0) parts.push(tn+'で耐える（盤面耐久の'+pct1(best.esh)+'）');
+      else if(best.dsh > best.esh) parts.push(tn+'で押す（盤面火力の'+pct1(best.dsh)+'）');
+      else parts.push(tn+'（この段の効果は実戦力の計算に入っていない）');
+    }
+  }
+  // T3: この案だけで点く段（ほかの案に同じトレイトの同じ段以上が無い）。
+  // オーンのように3案が6体を共有すると T1 は3案とも同じ段（ディフェンダー6）になり、
+  // 強みの行が3案とも同じ文面になる（2026-09-25 実ブラウザで確認）。違いは入れ替えた駒が点ける段。
+  const axisTr = new Set((UNIT_MAP[r.axisApi]||{}).traits||[]);
+  const own = r.active.filter(function(a){
+    if(!a.style || FREE_TRAITS.has(a.name) || a.name+'|'+a.minUnits === t1key) return false;
+    return !all.some(function(x, j){
+      return j !== idx && (x.active||[]).some(function(b){
+        return b.name === a.name && (b.minUnits||0) >= (a.minUnits||0); });
+    });
+  });
+  if(own.length) parts.push('この案だけ '+own.map(function(a){
+    return tnameOf(a.name)+a.minUnits+(axisTr.has(a.name)?'（軸のトレイト）':''); }).join('・'));
+  const n = all.length;
+  const others = all.filter(function(x, j){ return j !== idx && x.bp; });
+  if(n >= 2 && others.length){
+    const sup = [];
+    const dmax = Math.max.apply(null, others.map(function(x){ return x.bp.boardDps; }));
+    if(dmax > 0 && bp.boardDps > dmax && (bp.boardDps - dmax)/dmax >= STRENGTH_MIN_LEAD)
+      sup.push('火力が'+n+'案で一番（'+fmt(bp.boardDps)+'/秒・+'+pct1((bp.boardDps-dmax)/dmax)+'）');
+    const sec = function(x){ return Math.min(x.bp.seconds, POWER.horizon); };
+    const smax = Math.max.apply(null, others.map(sec));
+    if(smax > 0 && sec(r) > smax && (sec(r) - smax)/smax >= STRENGTH_MIN_LEAD)
+      sup.push(n+'案で一番長く保つ（'+sec(r).toFixed(1)+'秒'+(bp.capped?'以上':'')+'）');
+    const cmin2 = Math.min.apply(null, others.map(function(x){ return x.totalCost; }));
+    if(r.totalCost < cmin2) sup.push('一番安い（合計'+r.totalCost+'・次は'+cmin2+'）');
+    if(sup.length) sup.forEach(function(x){ parts.push(x); });
+    else parts.push('数字で'+n+'案の一番になる項目は無い');
+  }
+  return parts;
+}
+
+/* 全案がそろってから、前衛の3案の強み・条件・並びの注記を埋める。 */
+function finishCarryCards(res, cards){
+  if(!res.length || !res[0].diverse) return;
+  const n = res.length;
+  const rank = function(get, better){
+    return res.map(function(x){
+      const v = get(x);
+      return 1 + res.filter(function(y){ return better(get(y), v); }).length;
+    });
+  };
+  const has = res.every(function(x){ return x.bp; });
+  const rD = has ? rank(function(x){ return x.bp.boardDps; }, function(a,b){ return a > b; }) : null;
+  const rS = has ? rank(function(x){ return Math.min(x.bp.seconds, POWER.horizon); }, function(a,b){ return a > b; }) : null;
+  const rC = rank(function(x){ return x.totalCost; }, function(a,b){ return a < b; });
+  res.forEach(function(r, i){
+    const c = cards[i];
+    const st = c.querySelector('.strength');
+    if(st) st.innerHTML = '<b>強み: </b>' + strengthParts(r, res, i).join('・');
+    if(r.diverse.step >= 2 && !r.diverse.tooSimilar){
+      const cond = st && st.nextSibling;
+      if(cond){
+        const shared = sharedCount(r.units.map(function(u){ return u.apiName; }),
+                                   res[0].units.map(function(u){ return u.apiName; }));
+        cond.textContent = r.diverse.without.map(function(b){ return unameOf(b); }).join('・')
+          + ' を使わない条件での最良（案1の' + Math.round(r.score / res[0].score * 100) + '%）・案1と共通'
+          + shared + '体';
+      }
+    }
+    const det = el('details','en-orig');
+    det.appendChild(el('summary',null,'数字の比較（'+n+'案）'));
+    const body = el('div','note');
+    body.innerHTML = (has ? ('火力 '+fmt(r.bp.boardDps)+'/秒（'+rD[i]+'位）・保つ '
+        + Math.min(r.bp.seconds, POWER.horizon).toFixed(1)+'秒'+(r.bp.capped?'以上':'')+'（'+rS[i]+'位）・') : '')
+      + '合計コスト '+r.totalCost+'（'+rC[i]+'位）'
+      + '<br><span class="wtxt">未検証</span>: 「一番」と言う差の線 '+Math.round(STRENGTH_MIN_LEAD*100)
+      + '%・僅差の線 '+Math.round(NEAR_TIE*100)+'%、キャリーのモデル（★は解の星・アイテム無し）。';
+    det.appendChild(body);
+    c.appendChild(det);
+  });
+}
+
 function renderCarry(m){
   const ctl=el('div','controls');
   const sel=el('select');
@@ -5074,8 +5789,28 @@ function renderCarry(m){
     + '重みを下げると<b>軸のトレイトが1つも発動しない解が8体で出た</b>（現行式では0体）。'
     + 'トレイトの素点は現行式が 16.00、重み無しの案が 16.44 でほぼ差が無く、'
     + '「軸が浮く」ほうの害が大きいと判断している。この判断は<b>未検証</b>。';
-  m.appendChild(premise('軸の重み2.0・減点6.0（前衛でも同じ）／アイテム・配置・勝率は入っていない',
-                        [note, note2]));
+  // リロールの2段組み（NEXT.md Y）と前衛の3案（NEXT.md Z）の前提。数字は data.js の表から出す。
+  const note3=el('div','note');
+  note3.innerHTML='<b>コスト1〜3 の軸は「先に回すレベルの盤面を組んでから広げる」。</b>'
+    + 'ユーザーが選んだ作り方（「先にレベル6で揃う6体を組んでから8体に広げる」）。'
+    + '1段目はレベルL（コスト1〜2→6・コスト3→7）で出せる駒だけでL体を組み、主役のコスト帯の駒を'
+    + '<b>★3として</b>測る。★3にする駒が '+(ROLL_META.min_targets==null?'?':ROLL_META.min_targets)
+    + ' 体未満の盤面は採らない（減点 '+(SB.roll_target_penalty==null?'?':SB.roll_target_penalty)+'）。'
+    + '2段目はその盤面を固定して、盤面の体数のレベルで出せる駒を足す。'
+    // 並びは iter_plans が1段目の点の順に出す（src/engine/comps.py）。カードの点は広げた後の点。
+    + '<b>案の並びは1段目（回す盤面）の点の順</b>で、カードの「スコア」は広げた後の盤面の点。'
+    + 'そのため並びとスコアの大小が逆になることがある。'
+    + '<br>「一番火力を出す駒」は★3/★2・<b>アイテム無し</b>のモデルの数字で、実戦とは限らない。';
+  const note4=el('div','note');
+  note4.innerHTML='<b>前衛を軸にしたときは、3案のキャリーが重ならないように解く。</b>'
+    + 'キャリー＝軸以外で盤面の秒間ダメージへの寄与が最大の駒（アイテム無しのモデル）。'
+    + '案1 → 案1のキャリーを使わない最良 → 案1・案2のキャリーを使わない最良 の順に解き、'
+    + '案2・案3は既出の案と '+(SB.diverse_min_diff==null?'?':SB.diverse_min_diff)
+    + ' 体以上違う盤面に限る（この線は設計判断で<span class="wtxt">未検証</span>）。'
+    + '案は点の順に並べ替えない（条件の説明が崩れるため）。';
+  m.appendChild(premise('軸の重み2.0・減点6.0／コスト1〜3は回す盤面から組む／前衛は3案でキャリーを変える'
+                        + '／アイテム・配置・勝率は入っていない',
+                        [note, note2, note3, note4, rollAssumptionsNote()]));
 
   if(carryExclude.size){
     const ex=el('div','note');
@@ -5094,169 +5829,66 @@ function renderCarry(m){
   function run(){
     const api=sel.value;
     carrySize=parseInt(size.value,10);
-    if(!api){ box.innerHTML='<div class="empty">軸にする駒を選ぶと構成を計算します</div>'; return; }
+    box.dataset.done='';
+    if(!api){ box.innerHTML='<div class="empty">軸にする駒を選ぶと構成を計算します</div>';
+              box.dataset.done='1'; return; }
     axisSel=api; carrySel=api;   // 配置・対戦中タブも同じ駒を見る
+    const token = ++_carryRunToken;
     status.textContent='計算中…';
     box.innerHTML='';
-    setTimeout(function(){
-      const t0=Date.now();
-      const res=solve(api, carrySize, {top:3, exclude:Array.from(carryExclude)});
-      status.textContent=(Date.now()-t0)+' ms';
-      if(!res.length){ box.innerHTML='<div class="empty">解が見つかりませんでした</div>'; return; }
-
-      // ---- 軸そのものの見出し（誰を軸にしているか・前衛か後衛か）----
-      const axis = UNIT_MAP[api];
-      const hd = el('div','card');
-      hd.style.position='static'; hd.style.maxHeight='none'; hd.style.marginBottom='12px';
-      const h1 = el('h2');
-      h1.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap';
-      h1.appendChild(unitIcon(axis,28));
-      h1.appendChild(document.createTextNode(uname(axis)+'（コスト'+axis.cost+'）を軸にした構成'));
-      const kind = res[0].axisKind || axisKind(axis);
-      const kb = el('span','badge '+(kind==='unknown'?'warn':'off'), AXIS_KIND_LABEL[kind]);
-      kb.title = kind==='unknown'
-        ? 'op.gg の役割名（リーパー / スペシャリストなど）では前衛か後衛か決まらず、'
-          + '射程2以下なので射程でも決めていない。射程1でキャリーをやる駒がここに入る。'
-        : '役割 '+roleJa(axis.role)+' から判定（表に無ければ射程3以上を後衛とする）';
-      h1.appendChild(kb);
-      h1.appendChild(backlineTag(axis));
-      hd.appendChild(h1);
-      hd.appendChild(el('div','note',
-        '軸のトレイト: '+axis.traits.map(tnameOf).join(' / ')
-        + '　この案で発動しているのは '+res[0].axisTraitsHit+' / '+res[0].axisTraits+'。'));
-      if(res[0].axisTraitsHit===0)
-        hd.appendChild(noteHTML('<b>この案では軸のトレイトが1つも発動していない。</b>'
-          + '軸を置く意味が薄い解なので、盤面サイズを変えるか除外を見直すこと。','var(--bad)'));
-      // 型（何レベルで回すか）は構成データがある軸だけ。JS で判定を作り直さない。
-      const fr = rollForAxis(api);
-      if(fr) hd.appendChild(rollBlock(fr));
-      else hd.appendChild(el('div','note',
-        'この駒を主役にした構成は「先に使う構成」のデータに無いので、'
-        + '何レベルで回す型か・★3が現実的か・アイテムが何個要るかは出せない'
-        + '（型の判定は src/engine/rolllevel.py が正本で、画面では作り直していない）。'));
-      box.appendChild(hd);
-
-      res.forEach(function(r,i){
-        const c=el('div','card');
-        c.style.position='static'; c.style.maxHeight='none'; c.style.marginBottom='12px';
-        const ch=el('h2');
-        ch.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap';
-        ch.appendChild(document.createTextNode(
-          '案'+(i+1)+'　スコア '+r.score+'　合計コスト '+r.totalCost));
-        // この案のコスト分布。数えているだけで、型の判定はしていない。
-        const dd2=el('span','dist');
-        const cc2={};
-        r.units.forEach(function(u){ cc2[u.cost]=(cc2[u.cost]||0)+1; });
-        [1,2,3,4,5].forEach(function(k){
-          if(!cc2[k]) return;
-          dd2.appendChild(costChip(k));
-          dd2.appendChild(el('span','n','×'+cc2[k]));
-        });
-        ch.appendChild(dd2);
-        c.appendChild(ch);
-        const tbl=el('table'), th=el('thead'), htr=el('tr');
-        ['コスト','ユニット','トレイト','通常攻撃の秒間ダメージ 2★','実効体力 2★',''].forEach(function(x){
-          const e=el('th',null,x); e.style.cursor='default'; htr.appendChild(e);});
-        th.appendChild(htr); tbl.appendChild(th);
-        const tb=el('tbody');
-        r.units.forEach(function(u){
-          const tr=el('tr');
-          const c1=el('td'); c1.appendChild(costChip(u.cost)); tr.appendChild(c1);
-          const c2=el('td');
-          c2.style.cssText='display:flex;align-items:center;gap:7px';
-          c2.appendChild(unitIcon(UNIT_MAP[u.apiName]||u, 26));
-          if(u.apiName===r.axisApi){
-            const b=el('b'); b.appendChild(unitNameNode(u));
-            b.appendChild(document.createTextNode(' ★軸'));
-            b.style.color='var(--accent)'; c2.appendChild(b);
-          } else {
-            // 軸以外の駒も押せる。「この壁いいな」と思ったらそこから引き直せる。
-            const sw=el('span'); sw.style.cursor='pointer';
-            sw.title=u.name+' — 押すとこの駒を軸にし直す';
-            sw.appendChild(unitNameNode(u));
-            sw.onclick=function(e){ e.stopPropagation(); focusUnit(u.apiName); };
-            c2.appendChild(sw);
-          }
-          tr.appendChild(c2);
-          const c3=el('td','wrap');
-          u.traits.forEach(function(t){
-            let on=false;
-            r.active.forEach(function(a){ if(a.name===t) on=true; });
-            const tg=el('span','tag'+(on?' hit':''),tnameOf(t));
-            tg.title=t;
-            c3.appendChild(tg);
-          });
-          tr.appendChild(c3);
-          tr.appendChild(el('td','num',fmt(u.stars['2'].auto_dps)));
-          tr.appendChild(el('td','num',fmt(u.stars['2'].ehp_p)));
-          const c6=el('td');
-          if(u.apiName!==r.axisApi){
-            const x=el('button',null,'除外');
-            x.style.cssText='background:var(--panel2);color:var(--dim);border:1px solid var(--line);border-radius:4px;padding:0 6px;cursor:pointer;font-size:11px';
-            x.onclick=function(e){ e.stopPropagation(); carryExclude.add(u.apiName); render(); };
-            c6.appendChild(x);
-          }
-          tr.appendChild(c6);
-          tb.appendChild(tr);
-        });
-        tbl.appendChild(tb);
-        const w=el('div','tablewrap'); w.appendChild(tbl); c.appendChild(w);
-
-        const act=el('div'); act.style.marginTop='10px';
-        act.appendChild(el('span','dim','発動中： '));
-        r.active.forEach(function(a){
-          const s=el('span','tag hit',tnameOf(a.name)+' ('+a.minUnits+')');
-          const vars=Object.keys(a.variables||{}).map(function(k){
-            return termLabel(k)+'='+fmt(a.variables[k]);}).join(', ');
-          s.title=a.name+(vars?('\n'+vars):'');
-          // ★ 同じ人数で複数の段が同時に成立するトレイト（Set18 では Rival だけ）★
-          // 採る段は変えていない。どちらが強いかはデータからは決まらないので、
-          // 「別の段も成立している」ことだけ出して人が判断する。
-          if((a.alsoMatching||[]).length){
-            const b=el('span','badge warn','段2つ');
-            b.title='同じ人数で別の段も成立している: '
-              + a.alsoMatching.map(function(x){
-                  return x.minUnits+'〜'+(x.maxUnits==null?'∞':x.maxUnits)
-                       +'体 階級'+x.style; }).join(' / ')
-              + '\n採っているのは '+a.minUnits+'体の段（階級'+a.style+'）。'
-              + 'どちらが強いかはデータからは決まらない。';
-            s.appendChild(b);
-          }
-          if(a.tierGap){
-            const b=el('span','badge bad','段の穴');
-            b.title='どの段の人数範囲にも入っていないので、下の段で表示している';
-            s.appendChild(b);
-          }
-          act.appendChild(s);
-        });
-        c.appendChild(act);
-        if(r.dead.length){
-          const dd=el('div','note');
-          dd.textContent='あと少しで届くトレイト： '+r.dead.map(function(a){
-            return tnameOf(a.name)+' あと'+a.needs+'体';}).join('  /  ');
-          c.appendChild(dd);
+    const t0=Date.now();
+    const cardsBox=el('div'), tailBox=el('div');
+    const res=[], cards=[];
+    let it = null;
+    /* 1案ずつ出す（前衛の3案は解き直しが3回なので、案1 を先に見せる）。
+       別の駒を選び直したら古い計算は捨てる（token）。 */
+    function step(){
+      if(token !== _carryRunToken) return;
+      if(!it) it = solveForAxisSteps(api, carrySize, {top:3, exclude:Array.from(carryExclude)});
+      const nx = it.next();
+      if(!nx.done){
+        const r = nx.value;
+        res.push(r);
+        if(res.length === 1){
+          box.appendChild(carryHeader(api, r));
+          box.appendChild(cardsBox);
+          box.appendChild(tailBox);
         }
-        // オーグメント前提で数えなかった段。消すと「なぜ点かないのか」が分からない。
-        if((r.gated||[]).length){
-          c.appendChild(noteHTML('<b>オーグメント前提なので数えていない段: </b>'
-            + r.gated.map(function(a){
-                return tnameOf(a.name)+' を '+a.count+'体（'+a.gatedAt
-                     + '体以上の段はオーグメント「'+anameOf(a.gatedBy)+'」を'
-                     + '取って初めて成立する）';
-              }).join(' / ')
-            + '。取っている場合は、この構成の評価はここに書いてある分だけ低く出ている。',
-            'var(--warn)'));
-        }
-        box.appendChild(c);
-      });
+        const c = carryCard(r, res.length-1, api);
+        cards.push(c);
+        cardsBox.appendChild(c);
+        if(res.length < 3) status.textContent='案'+(res.length+1)+'/3 を計算中…';
+        setTimeout(step, 0);
+        return;
+      }
+      if(!res.length){
+        box.innerHTML='<div class="empty">解が見つかりませんでした</div>';
+        status.textContent=(Date.now()-t0)+' ms';
+        box.dataset.done='1';
+        return;
+      }
+      finishCarryCards(res, cards);
+      if(res[0].diverse && res.length < 3)
+        tailBox.appendChild(noteHTML('キャリーが重ならない案は '+res.length+' 案まで。', 'var(--warn)'));
+      if(res[0].diverse){
+        res.forEach(function(r, i){
+          if(i && r.score > res[0].score)
+            tailBox.appendChild(noteHTML('案'+(i+1)+'のほうが点が高い ── 探索は近似なので、'
+              + '条件を足したほうが良い盤面に行き着くことがある（案1が最良とは限らない）。'));
+        });
+      }
       // キャラ → 構成 → オーグメント の順で並べる
-      if(res && res[0]) box.appendChild(augMatchCard(res[0], UNIT_MAP[api]));
-      box.appendChild(traitBonusCard(UNIT_MAP[api]));
-      box.appendChild(timelineCard(UNIT_MAP[api]));
-      box.appendChild(itemCard(UNIT_MAP[api]));
-      box.appendChild(placeCard(UNIT_MAP[api]));
-      box.appendChild(measuredCard(UNIT_MAP[api]));
-    },10);
+      tailBox.appendChild(el('div','note dim','このオーグメントは案1の盤面で見ている'));
+      tailBox.appendChild(augMatchCard(res[0], UNIT_MAP[api]));
+      tailBox.appendChild(traitBonusCard(UNIT_MAP[api]));
+      tailBox.appendChild(timelineCard(UNIT_MAP[api]));
+      tailBox.appendChild(itemCard(UNIT_MAP[api]));
+      tailBox.appendChild(placeCard(UNIT_MAP[api]));
+      tailBox.appendChild(measuredCard(UNIT_MAP[api]));
+      status.textContent=(Date.now()-t0)+' ms';
+      box.dataset.done='1';
+    }
+    setTimeout(step, 10);
   }
   sel.onchange=run;
   size.onchange=run;
