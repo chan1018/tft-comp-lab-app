@@ -885,19 +885,34 @@ const cov = T.meta.ability_coverage;
      最初に put するので帯の一番下に出る。theory_is_stale の return より前に置く（op.gg が遅れていても消えない）。
      文字が多すぎる（NEXT.md B）ので、たたんだ1行にする。 */
   const ON = ((F.older_notes || {}).mismatch) || [];
-  if(ON.length){
-    const onS = '前のパッチのノートと Riot のデータで値が違う箇所が ' + ON.length + ' か所あります（'
+  /* op.gg 側（2026-10-07）: 18.3 のミッドパッチのカ＝ジックスの弱体が op.gg の 18.4 で弱体前のまま。
+     Riot 側と同じく検出して並べるだけ（計算は op.gg の値のまま）。 */
+  const ONO = ((F.older_notes || {}).opgg_mismatch) || [];
+  if(ON.length || ONO.length){
+    const parts = [];
+    if(ON.length) parts.push('Riot のデータで ' + ON.length + ' か所（'
       + ON.map(function(x){
           return esc(x.who) + (x.tiers && x.tiers.length
             ? ' ' + x.tiers.map(function(t){ return esc(t.min); }).join('・') + '体' : '');
-        }).join('／') + '）。'
-      + (ON.every(function(x){ return x.used === false; })
-         ? 'どれも計算には入っていない値です。' : '計算は Riot の値のままです。');
+        }).join('／') + '）');
+    if(ONO.length) parts.push('op.gg のスキル係数で ' + ONO.length + ' か所（'
+      + ONO.map(function(x){ return esc(x.who); }).filter(function(v, i, a){ return a.indexOf(v) === i; })
+          .join('／') + '）');
+    const all = ON.concat(ONO);
+    const onS = '前のパッチのノートと値が違う箇所があります: ' + parts.join('・') + '。'
+      + (all.every(function(x){ return x.used === false; })
+         ? 'どれも計算には入っていない値です。'
+         : '計算は ' + (ON.length && ONO.length ? 'Riot・op.gg' : ON.length ? 'Riot' : 'op.gg')
+           + ' の値のままです。');
     const onB = ON.map(function(x){
         return esc(x.who) + ' ' + esc(x.what) + ': Riot ' + esc(x.riot) + '／パッチ'
           + esc((x.patches || [x.patch]).join('・')) + 'のノート ' + esc(x.notes)
           + (x.used === false ? '（計算には入っていない値）' : '');
-      }).join('<br>')
+      }).concat(ONO.map(function(x){
+        return esc(x.who) + ' ' + esc(x.what) + ': op.gg ' + esc(x.opgg) + '／パッチ'
+          + esc((x.patches || [x.patch]).join('・')) + 'のノート ' + esc(x.notes)
+          + (x.used === false ? '（計算には入っていない値）' : '');
+      })).join('<br>')
       + '<br>どちらが実際のゲームの値かは確かめられていないので、ノートの値での上書きはしていません。';
     put('<details><summary>' + onS + '</summary>' + onB + '</details>', 'neutral');
   }
